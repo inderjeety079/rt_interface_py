@@ -93,10 +93,12 @@ class RtInterface:
 
     def process_rt_msg(self):
         print("waiting for connection")
-        client_sock = self.connection_handle.accept_connection()
+        # client_sock = self.connection_handle.accept_connection()
+        self.connection_handle.bind()
 
         while self.keep_alive and not self.sigterm_event.is_set():
-            self.connection_handle.recv_msg(client_sock)
+            # self.connection_handle.recv_msg(client_sock)
+            self.connection_handle.recv_msg()
             try:
                 status = self.parse_rt_msg(self.connection_handle.raw_data)
                 if status:
@@ -144,10 +146,11 @@ class RtInterface:
 
 
 def main():
-    logging.basicConfig(format='[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s', level=logging.DEBUG, filename='rt_interface.log')
     rospy.init_node("rt_interface")
+    logging.basicConfig(format='[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s', level=logging.DEBUG,
+                        filename='rt_interface.log')
     logging.debug('Logger created')
-    rt_interface = RtInterface('10.3.1.1', 5102)
+    rt_interface = RtInterface('10.3.1.59', 5102)
 
     print("Starting read thread")
     rt_interface.read_thread.start()
