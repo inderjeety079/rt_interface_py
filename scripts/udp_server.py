@@ -57,9 +57,9 @@ class UdpServer:
 
 
 
-    def recv_msg(self, client):
+    def recv_msg(self):
         # request = self.recv_batch(client_sock)
-        data = client.recv(4096)
+        data = self.socket.recvfrom(4096)
         self.raw_data = self.raw_data + data
         chunk_size = len(data)
 
