@@ -32,6 +32,7 @@ class UdpServer:
             self.logger.info('Socket created')
         except socket.error as err:
             self.logger.error("Failed to create socket: {}".format(err[1]))
+        self.bind()
 
 
     def bind(self):
@@ -57,9 +58,9 @@ class UdpServer:
 
 
 
-    def recv_msg(self):
+    def recv_msg(self,client):
         # request = self.recv_batch(client_sock)
-        data = self.socket.recvfrom(4096)
+        data = client.recv(4096)
         self.raw_data = self.raw_data + data
         chunk_size = len(data)
 
