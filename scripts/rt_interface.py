@@ -18,6 +18,7 @@ import math
 from geometry_msgs.msg import Quaternion
 # from geometry_msgs.msg import Pose
 import struct
+import time
 
 
 class RtInterface:
@@ -93,12 +94,11 @@ class RtInterface:
 
     def process_rt_msg(self):
         print("waiting for connection")
-        # client_sock = self.connection_handle.accept_connection()
-        self.connection_handle.bind()
+        client_sock = self.connection_handle.accept_connection()
+        # self.connection_handle.bind()
 
         while self.keep_alive and not self.sigterm_event.is_set():
-            # self.connection_handle.recv_msg(client_sock)
-            self.connection_handle.recv_msg()
+            self.connection_handle.recv_msg(client_sock)
             try:
                 status = self.parse_rt_msg(self.connection_handle.raw_data)
                 if status:
@@ -109,7 +109,8 @@ class RtInterface:
                 self.logger.debug("keyboard interrupt. Exiting process thread")
             except Exception as ex:
                 print("Exception. Exiting process thread")
-                sys.exit(-1)
+                time.sleep(0.1)
+                # sys.exit(-1)
 
     # def send_msg_to_rt(self, msg):
 
@@ -150,7 +151,7 @@ def main():
     logging.basicConfig(format='[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s', level=logging.DEBUG,
                         filename='rt_interface.log')
     logging.debug('Logger created')
-    rt_interface = RtInterface('10.3.1.59', 5102)
+    rt_interface = RtInterface("", 5102)
 
     print("Starting read thread")
     rt_interface.read_thread.start()

@@ -58,14 +58,17 @@ class UdpServer:
 
 
 
-    def recv_msg(self):
+    def recv_msg(self,client):
         # request = self.recv_batch(client_sock)
-        # data = client.recv(4096)
-        data,addr = self.socket.recvfrom(4096)
+        data = client.recv(4096)
+        # data, address = self.socket.recvfrom(4096)
         self.raw_data = self.raw_data + data
         chunk_size = len(data)
 
-
     def send_msg(self, client, msg, length):
         self.socket.send_to(msg, (self.hostname, self.port))
+
+    def close_socket(self):
+        self.logger.info("Closing UDP socket: {}".format(self.hostname, self.port))
+        self.socket.close()
 
