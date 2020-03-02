@@ -53,20 +53,21 @@ class RtInterface:
         header_plus_length_size = 1 + 4
         payload_size = 20
         complete_packet_size = header_plus_length_size + payload_size
+        msg_bytearray = msg
         msg_len = len(msg)
         got_complete_packet = False
         if msg_len == 0:
             self.logger.info("No data in the msg")
         self.logger.info('chunk size: {}'.format(msg_len))
         if self.packet_state == 'header':
-            if msg[0] == '\xfd' and msg[1] == '\xfd':
+            if msg_bytearray[0] == '\xfd' and msg_bytearray[1] == '\xfd':
                 self.packet_state = 'payload_size'
             else:
-                self.logger.error("header: {}, junk request".format(ord(msg[0])))
+                self.logger.error("header: {}, junk request".format(ord(msg_bytearray[0])))
 
         if self.packet_state == 'payload_size':
             if msg_len >= header_plus_length_size:
-                payload_length = struct.unpack('I', msg[2:6])[0]
+                payload_length = struct.unpack('I', msg_bytearray[2:6])[0]
                 self.logger.info('Payload length: {}'.format(payload_length))
                 self.packet_state = 'payload'
 
@@ -75,11 +76,11 @@ class RtInterface:
             if msg_len >= complete_packet_size :
                 self.odom_data.header.stamp = rospy.Time.now()
 
-                pose_x = struct.unpack('f', msg[6:10])[0] / 100.0
-                pose_y = struct.unpack('f', msg[10:14])[0] / 100.0
-                pose_theta = struct.unpack('f', msg[14:18])[0]
-                twist_linear = struct.unpack('f', msg[18:22])[0] / 100.0
-                twist_angular = struct.unpack('f', msg[22:26])[0]
+                pose_x = struct.unpack('f', msg_bytearray[6:10])[0] / 100.0
+                pose_y = struct.unpack('f', msg_bytearray[10:14])[0] / 100.0
+                pose_theta = struct.unpack('f', msg_bytearray[14:18])[0]
+                twist_linear = struct.unpack('f', msg_bytearray[18:22])[0] / 100.0
+                twist_angular = struct.unpack('f', msg_bytearray[22:26])[0]
 
                 self.odom_data.pose.pose.position.x = pose_x
                 self.odom_data.pose.pose.position.y = pose_y
@@ -87,7 +88,7 @@ class RtInterface:
 
                 self.odom_data.pose.pose.orientation.x = 0.0
                 self.odom_data.pose.pose.orientation.y = 0.0
-                self.odom_data.pose.pose.orientation.z = 0.0
+                self.odom_data.pose.pose.orientation.z = pose_theta
 
                 self.odom_data.twist.twist.linear.x = twist_linear
                 self.odom_data.twist.twist.linear.y = 0.0
@@ -102,6 +103,7 @@ class RtInterface:
                 self.logger.info("position: [x: {}, y: {}, theta: {}]".format(pose_x, pose_y, pose_theta) )
                 self.logger.info("twist: [lin: {}, ang: {}]".format(twist_linear, twist_angular))
                 self.packet_state == 'header'
+                self.logger.info("Residual Msg: {}".format(msg_bytearray))
                 msg = ''
                 self.connection_handle.raw_data = ''
 
@@ -144,23 +146,24 @@ class RtInterface:
     # def receive_from_rt(self):
 
     def publish_odom_data(self):
-
         self.odom_pub.publish(self.odom_data)
 
     def publish_tf(self):
-        self.odom_to_bl_msg.transform.translation.x = self.odom_data.pose.position.x
-        self.odom_to_bl_msg.transform.translation.y = self.odom_data.pose.position.y
-        self.odom_to_bl_msg.transform.translation.z = self.odom_data.pose.position.z
+        self.odom_to_bl_msg.transform.translation.x = self.odom_data.pose.pose.position.x
+        self.odom_to_bl_msg.transform.translation.y = self.odom_data.pose.pose.position.y
+        self.odom_to_bl_msg.transform.translation.z = self.odom_data.pose.pose.position.z
 
         odom_quat = Quaternion(self.odom_data.pose.pose.orientation.x, self.odom_data.pose.pose.orientation.y,
                                self.odom_data.pose.pose.orientation.z, self.odom_data.pose.pose.orientation.w)
         odom_euler = euler_from_quaternion([odom_quat.x, odom_quat.y, odom_quat.z, odom_quat.w])
-        odom_quat_trans = quaternion_from_euler(0, 0, math.radians(odom_euler))
+        roll = float(0.0)
+        pitch = float(0.0)
+        odom_quat_trans = quaternion_from_euler(math.radians(roll), math.radians(pitch), math.radians(odom_euler[2]))
 
-        self.odom_to_bl_msg.transform.rotation.x = odom_quat_trans[0]
-        self.odom_to_bl_msg.transform.rotation.y = odom_quat_trans[1]
-        self.odom_to_bl_msg.transform.rotation.z = odom_quat_trans[2]
-        self.odom_to_bl_msg.transform.rotation.w = odom_quat_trans[3]
+        #self.odom_to_bl_msg.transform.rotation.x = odom_quat_trans[0]
+        #self.odom_to_bl_msg.transform.rotation.y = odom_quat_trans[1]
+        #self.odom_to_bl_msg.transform.rotation.z = odom_quat_trans[2]
+        #self.odom_to_bl_msg.transform.rotation.w = odom_quat_trans[3]
         self.odom_to_bl_msg.header.stamp = rospy.Time.now()
         self.tf_broadcaster.sendTransform(self.odom_to_bl_msg)
 
