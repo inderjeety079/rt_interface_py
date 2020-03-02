@@ -70,27 +70,41 @@ class RtInterface:
                 self.logger.info('Payload length: {}'.format(payload_length))
                 self.packet_state = 'payload'
 
-
         if self.packet_state == 'payload':
+
             if msg_len >= complete_packet_size :
                 self.odom_data.header.stamp = rospy.Time.now()
-                self.odom_data.pose.pose.position.x = struct.unpack('f', msg[6:10])[0] / 100.0
-                self.odom_data.pose.pose.position.y = struct.unpack('f', msg[10:14])[0] / 100.0
+
+                pose_x = struct.unpack('f', msg[6:10])[0] / 100.0
+                pose_y = struct.unpack('f', msg[10:14])[0] / 100.0
+                pose_theta = struct.unpack('f', msg[14:18])[0]
+                twist_linear = struct.unpack('f', msg[18:22])[0] / 100.0
+                twist_angular = struct.unpack('f', msg[22:26])[0]
+
+                self.odom_data.pose.pose.position.x = pose_x
+                self.odom_data.pose.pose.position.y = pose_y
                 self.odom_data.pose.pose.position.z = 0.0
 
-                self.odom_data.twist.twist.linear.x = struct.unpack('f', msg[14:18])[0] / 100.0
+                self.odom_data.pose.pose.orientation.x = 0.0
+                self.odom_data.pose.pose.orientation.y = 0.0
+                self.odom_data.pose.pose.orientation.z = 0.0
+
+                self.odom_data.twist.twist.linear.x = twist_linear
                 self.odom_data.twist.twist.linear.y = 0.0
                 self.odom_data.twist.twist.linear.z = 0.0
 
-
                 self.odom_data.twist.twist.angular.x = 0.0
                 self.odom_data.twist.twist.angular.y = 0.0
-                self.odom_data.twist.twist.angular.z = struct.unpack('f', msg[14:18])[0]
+                self.odom_data.twist.twist.angular.z = twist_angular
 
                 got_complete_packet = True
                 self.logger.info("Got complete packet")
-                ms"
+                self.logger.info("position: [x: {}, y: {}, theta: {}]".format(pose_x, pose_y, pose_theta) )
+                self.logger.info("twist: [lin: {}, ang: {}]".format(twist_linear, twist_angular))
                 self.packet_state == 'header'
+                msg = ''
+                self.connection_handle.raw_data = ''
+
 
         return got_complete_packet
 
@@ -101,13 +115,10 @@ class RtInterface:
         status = False
 
         while self.keep_alive and not self.sigterm_event.is_set():
-        #while True:
-            #self.connection_handle.recv_msg()
-            #self.connection_handle.recv_msg(client_sock)
             try:
-		self.logger.info("Waiting for the data to arrive in rt interface")
-            	self.connection_handle.recv_msg()
-		self.logger.info("Recvd msg:{}".format(self.connection_handle.raw_data))
+                self.logger.info("Waiting for the data to arrive in rt interface")
+                self.connection_handle.recv_msg()
+                self.logger.info("Recvd msg:{}".format(self.connection_handle.raw_data))
                 status = self.parse_rt_msg(self.connection_handle.raw_data)
                 if status:
                     self.publish_odom_data()

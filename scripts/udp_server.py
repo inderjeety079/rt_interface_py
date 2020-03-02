@@ -62,10 +62,11 @@ class UdpServer:
         # request = self.recv_batch(client_sock)
         #data = client.recv(4096)
         data, address = self.socket.recvfrom(4096)
+        data.decode()
         self.raw_data = self.raw_data + data
         chunk_size = len(data)
         self.logger.info("received data from : {}, {}: data: {}".format(address[0], address[1], data))
-        return data
+        # return data
 
     def send_msg(self, client, msg, length):
         self.socket.send_to(msg, (self.hostname, self.port))
