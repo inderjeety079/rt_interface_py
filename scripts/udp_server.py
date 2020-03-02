@@ -28,7 +28,7 @@ class UdpServer:
         # self.trajectory_logger2 = LogTrajectory(self.SIGTERM_event, self.task_queues_set)
 
         try:
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.logger.info('Socket created')
         except socket.error as err:
             self.logger.error("Failed to create socket: {}".format(err[1]))
@@ -58,12 +58,14 @@ class UdpServer:
 
 
 
-    def recv_msg(self,client):
+    def recv_msg(self):
         # request = self.recv_batch(client_sock)
-        data = client.recv(4096)
-        # data, address = self.socket.recvfrom(4096)
+        #data = client.recv(4096)
+        data, address = self.socket.recvfrom(4096)
         self.raw_data = self.raw_data + data
         chunk_size = len(data)
+        self.logger.info("received data from : {}, {}: data: {}".format(address[0], address[1], data))
+        return data
 
     def send_msg(self, client, msg, length):
         self.socket.send_to(msg, (self.hostname, self.port))

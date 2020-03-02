@@ -45,6 +45,7 @@ class RtInterface:
 
         self.packet_state = 'header'
         self.logger.info("RtInterface Constructed")
+        self.raw_data = ''
         # self.write_thread.start(self)
 
     def parse_rt_msg(self, msg):
@@ -55,29 +56,29 @@ class RtInterface:
         msg_len = len(msg)
         got_complete_packet = False
         if msg_len == 0:
-            self.logger.debug("No data in the msg")
-        self.logger.debug('chunk size: {}'.format(msg_len))
+            self.logger.info("No data in the msg")
+        self.logger.info('chunk size: {}'.format(msg_len))
         if self.packet_state == 'header':
-            if msg[0] == '\xff' and msg[1] == '\xff':
-                packet_state = 'payload_size'
+            if msg[0] == '\xfd' and msg[1] == '\xfd':
+                self.packet_state = 'payload_size'
             else:
                 self.logger.error("header: {}, junk request".format(ord(msg[0])))
 
         if self.packet_state == 'payload_size':
             if msg_len >= header_plus_length_size:
                 payload_length = struct.unpack('I', msg[2:6])[0]
-                self.logger.debug('Payload length: {}'.format(payload_length))
-                packet_state = 'payload'
+                self.logger.info('Payload length: {}'.format(payload_length))
+                self.packet_state = 'payload'
 
 
         if self.packet_state == 'payload':
             if msg_len >= complete_packet_size :
                 self.odom_data.header.stamp = rospy.Time.now()
-                self.odom_data.pose.pose.position.x = struct.unpack('f', msg[6:10])[0] / 100
-                self.odom_data.pose.pose.position.y = struct.unpack('f', msg[10:14])[0] / 100
+                self.odom_data.pose.pose.position.x = struct.unpack('f', msg[6:10])[0] / 100.0
+                self.odom_data.pose.pose.position.y = struct.unpack('f', msg[10:14])[0] / 100.0
                 self.odom_data.pose.pose.position.z = 0.0
 
-                self.odom_data.twist.twist.linear.x = struct.unpack('f', msg[14:18])[0] / 100
+                self.odom_data.twist.twist.linear.x = struct.unpack('f', msg[14:18])[0] / 100.0
                 self.odom_data.twist.twist.linear.y = 0.0
                 self.odom_data.twist.twist.linear.z = 0.0
 
@@ -87,19 +88,26 @@ class RtInterface:
                 self.odom_data.twist.twist.angular.z = struct.unpack('f', msg[14:18])[0]
 
                 got_complete_packet = True
-                msg = ""
+                self.logger.info("Got complete packet")
+                ms"
                 self.packet_state == 'header'
 
         return got_complete_packet
 
     def process_rt_msg(self):
-        print("waiting for connection")
-        client_sock = self.connection_handle.accept_connection()
-        # self.connection_handle.bind()
+        self.logger.debug("waiting for connection")
+        #client_sock = self.connection_handle.accept_connection()
+        self.connection_handle.bind()
+        status = False
 
         while self.keep_alive and not self.sigterm_event.is_set():
-            self.connection_handle.recv_msg(client_sock)
+        #while True:
+            #self.connection_handle.recv_msg()
+            #self.connection_handle.recv_msg(client_sock)
             try:
+		self.logger.info("Waiting for the data to arrive in rt interface")
+            	self.connection_handle.recv_msg()
+		self.logger.info("Recvd msg:{}".format(self.connection_handle.raw_data))
                 status = self.parse_rt_msg(self.connection_handle.raw_data)
                 if status:
                     self.publish_odom_data()
@@ -108,7 +116,7 @@ class RtInterface:
                 self.sigterm_event.set()
                 self.logger.debug("keyboard interrupt. Exiting process thread")
             except Exception as ex:
-                print("Exception. Exiting process thread")
+                self.logger.info("Exception: {}. Exiting process thread".format(ex))
                 time.sleep(0.1)
                 # sys.exit(-1)
 
@@ -151,7 +159,7 @@ def main():
     logging.basicConfig(format='[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s', level=logging.DEBUG,
                         filename='rt_interface.log')
     logging.debug('Logger created')
-    rt_interface = RtInterface("", 5102)
+    rt_interface = RtInterface('', 5102)
 
     print("Starting read thread")
     rt_interface.read_thread.start()
