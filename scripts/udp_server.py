@@ -16,17 +16,6 @@ class UdpServer:
         self.port = port
         self.max_pending_connections = max_connections
         self.raw_data = ''
-        # self.raw_bytearray_q = Queue()
-
-        # self.SIGTERM_event = Event()
-        # self.SIGTERM_event.clear()
-
-        # self.task_queues_set = {}
-        # self.task_queues_set['ButlerData'] = Queue.Queue()
-
-        # self.trajectory_logger = LogTrajectory(self.SIGTERM_event, self.task_queues_set)
-        # self.trajectory_logger2 = LogTrajectory(self.SIGTERM_event, self.task_queues_set)
-
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.logger.info('Socket created')

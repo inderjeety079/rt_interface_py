@@ -38,7 +38,7 @@ class RtInterface:
 
         self.odom_to_bl_msg = TransformStamped()
         self.odom_to_bl_msg.header.frame_id = "odom"
-        self.odom_to_bl_msg.child_frame_id = "base_link"
+        self.odom_to_bl_msg.child_frame_id = "base_footprint"
 
         self.odom_data = Odometry()
         self.sigterm_event.clear()
