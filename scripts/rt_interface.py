@@ -7,6 +7,7 @@ import sys
 from  threading import Thread, Event
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TransformStamped
+from sensor_msgs.msg import Imu
 import traceback
 # from tf2_ros import TransformBroadcaster
 # import tf2_ros
@@ -34,6 +35,7 @@ class RtInterface:
 
         self.odom_pub = rospy.Publisher('/encoder_odometry/odom', Odometry, queue_size=10)
         self.tf_broadcaster = tf2_ros.TransformBroadcaster()
+        self.imu_pub = rospy.Publisher('/xsens/imu', Imu, queue_size=1)
         self.sigterm_event = Event()
 
         self.odom_to_bl_msg = TransformStamped()
@@ -41,6 +43,7 @@ class RtInterface:
         self.odom_to_bl_msg.child_frame_id = "base_footprint"
 
         self.odom_data = Odometry()
+        self.imu_data = Imu()
         self.sigterm_event.clear()
 
         self.packet_state = 'header'
@@ -50,7 +53,7 @@ class RtInterface:
 
     def parse_rt_msg(self, msg):
         self.logger.debug("Raw Msg: {}".format(msg))
-        header_plus_length_size = 1 + 4
+        header_plus_length_size = 2 + 4
         payload_size = 20
         complete_packet_size = header_plus_length_size + payload_size
         msg_bytearray = msg
@@ -67,7 +70,7 @@ class RtInterface:
 
         if self.packet_state == 'payload_size':
             if msg_len >= header_plus_length_size:
-                payload_length = struct.unpack('I', msg_bytearray[2:6])[0]
+                payload_length = struct.unpack('<I', msg_bytearray[2:6])[0]
                 self.logger.info('Payload length: {}'.format(payload_length))
                 self.packet_state = 'payload'
 
@@ -76,37 +79,68 @@ class RtInterface:
             if msg_len >= complete_packet_size :
                 self.odom_data.header.stamp = rospy.Time.now()
 
-                pose_x = struct.unpack('f', msg_bytearray[6:10])[0] / 100.0
-                pose_y = struct.unpack('f', msg_bytearray[10:14])[0] / 100.0
-                pose_theta = struct.unpack('f', msg_bytearray[14:18])[0]
-                twist_linear = struct.unpack('f', msg_bytearray[18:22])[0] / 100.0
-                twist_angular = struct.unpack('f', msg_bytearray[22:26])[0]
+                packet_id = struct.unpack('<h', msg_bytearray[6:8])[0]
+                self.logger.info("Packet ID: {}".format(packet_id))
+                if packet_id == 2:
+                    pose_x = struct.unpack('<f', msg_bytearray[8:12])[0] / 100.0
+                    pose_y = struct.unpack('<f', msg_bytearray[12:16])[0] / 100.0
+                    pose_theta = struct.unpack('<f', msg_bytearray[16:20])[0]
+                    twist_linear = struct.unpack('<f', msg_bytearray[20:24])[0] / 100.0
+                    twist_angular = struct.unpack('<f', msg_bytearray[24:28])[0]
 
-                self.odom_data.pose.pose.position.x = pose_x
-                self.odom_data.pose.pose.position.y = pose_y
-                self.odom_data.pose.pose.position.z = 0.0
+                    self.odom_data.pose.pose.position.x = pose_x
+                    self.odom_data.pose.pose.position.y = pose_y
+                    self.odom_data.pose.pose.position.z = 0.0
 
-                self.odom_data.pose.pose.orientation.x = 0.0
-                self.odom_data.pose.pose.orientation.y = 0.0
-                self.odom_data.pose.pose.orientation.z = pose_theta
+                    odom_quat_trans = quaternion_from_euler(0.0, 0.0, math.radians(pose_theta))
 
-                self.odom_data.twist.twist.linear.x = twist_linear
-                self.odom_data.twist.twist.linear.y = 0.0
-                self.odom_data.twist.twist.linear.z = 0.0
+                    self.odom_data.pose.pose.orientation.x = odom_quat_trans[0]
+                    self.odom_data.pose.pose.orientation.y = odom_quat_trans[1]
+                    self.odom_data.pose.pose.orientation.z = odom_quat_trans[2]
+                    self.odom_data.pose.pose.orientation.w = odom_quat_trans[3]
 
-                self.odom_data.twist.twist.angular.x = 0.0
-                self.odom_data.twist.twist.angular.y = 0.0
-                self.odom_data.twist.twist.angular.z = twist_angular
+                    self.odom_data.twist.twist.linear.x = twist_linear
+                    self.odom_data.twist.twist.linear.y = 0.0
+                    self.odom_data.twist.twist.linear.z = 0.0
 
-                got_complete_packet = True
-                self.logger.info("Got complete packet")
-                self.logger.info("position: [x: {}, y: {}, theta: {}]".format(pose_x, pose_y, pose_theta) )
-                self.logger.info("twist: [lin: {}, ang: {}]".format(twist_linear, twist_angular))
+                    self.odom_data.twist.twist.angular.x = 0.0
+                    self.odom_data.twist.twist.angular.y = 0.0
+                    self.odom_data.twist.twist.angular.z = twist_angular
+
+                    got_complete_packet = True
+                    self.logger.info("Got Odometry Data")
+                    self.logger.info("position: [x: {}, y: {}, theta: {}]".format(pose_x, pose_y, pose_theta) )
+                    self.logger.info("twist: [lin: {}, ang: {}]".format(twist_linear, twist_angular))
+
+                if packet_id == 3:
+                    timestamp = struct.unpack('<I', msg_bytearray[8:12])[0]
+                    roll = struct.unpack('<f', msg_bytearray[12:16])[0]
+                    pitch = struct.unpack('<f', msg_bytearray[16:20])[0]
+                    yaw = struct.unpack('<f', msg_bytearray[20:24])[0] / 100.0
+                    ang_vel_x = struct.unpack('<f', msg_bytearray[28:32])[0]
+                    ang_vel_y = struct.unpack('<f', msg_bytearray[32:36])[0]
+                    ang_vel_z = struct.unpack('<f', msg_bytearray[36:40])[0]
+                    lin_acc_x = struct.unpack('<f', msg_bytearray[40:44])[0]
+                    lin_acc_y = struct.unpack('<f', msg_bytearray[44:48])[0]
+                    lin_acc_z = struct.unpack('<f', msg_bytearray[48:52])[0]
+
+                    odom_quat_trans = quaternion_from_euler(math.radians(roll), math.radians(pitch), math.radians(yaw))
+                    self.imu_data.header.stamp = rospy.Time.now()
+                    self.imu_data.orientation = odom_quat_trans
+                    self.imu_data.angular_velocity = [ang_vel_x, ang_vel_y, ang_vel_z]
+                    self.imu_data.linear_acceleration = [lin_acc_x, lin_acc_y, lin_acc_z]
+
+                    got_complete_packet = True
+                    self.logger.info("Got IMU Data")
+                    self.logger.info("orientation: [roll: {}, pitch: {}, yaw: {}]".format(roll, pitch, yaw))
+                    self.imu_pub.publish(self.imu_data)
+                    self.logger.info("Published IMU Data")
+
                 self.packet_state == 'header'
+                self.logger.info("Got complete packet")
                 self.logger.info("Residual Msg: {}".format(msg_bytearray))
                 msg = ''
                 self.connection_handle.raw_data = ''
-
 
         return got_complete_packet
 
@@ -160,10 +194,10 @@ class RtInterface:
         pitch = float(0.0)
         odom_quat_trans = quaternion_from_euler(math.radians(roll), math.radians(pitch), math.radians(odom_euler[2]))
 
-        #self.odom_to_bl_msg.transform.rotation.x = odom_quat_trans[0]
-        #self.odom_to_bl_msg.transform.rotation.y = odom_quat_trans[1]
-        #self.odom_to_bl_msg.transform.rotation.z = odom_quat_trans[2]
-        #self.odom_to_bl_msg.transform.rotation.w = odom_quat_trans[3]
+        self.odom_to_bl_msg.transform.rotation.x = odom_quat_trans[0]
+        self.odom_to_bl_msg.transform.rotation.y = odom_quat_trans[1]
+        self.odom_to_bl_msg.transform.rotation.z = odom_quat_trans[2]
+        self.odom_to_bl_msg.transform.rotation.w = odom_quat_trans[3]
         self.odom_to_bl_msg.header.stamp = rospy.Time.now()
         self.tf_broadcaster.sendTransform(self.odom_to_bl_msg)
 
