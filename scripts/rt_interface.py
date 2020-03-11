@@ -50,6 +50,7 @@ class RtInterface:
         self.logger.info("RtInterface Constructed")
         self.raw_data = ''
         self.packet_index = 0
+        self.payload_length = 0
         # self.write_thread.start(self)
 
     def parse_rt_msg(self, msg):
@@ -75,14 +76,14 @@ class RtInterface:
 
         if self.packet_state == 'payload_size':
             if msg_len >= header_plus_length_size:
-                payload_length = struct.unpack('<I', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
+                self.payload_length = struct.unpack('<I', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
                 self.packet_index += 4
-                self.logger.info('Payload length: {}'.format(payload_length))
+                self.logger.info('Payload length: {}'.format(self.payload_length))
                 self.packet_state = 'payload'
 
         if self.packet_state == 'payload':
 
-            if msg_len >= payload_length:
+            if msg_len >= self.payload_length:
                 self.odom_data.header.stamp = rospy.Time.now()
 
                 packet_id = struct.unpack('<I', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
