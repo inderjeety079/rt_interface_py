@@ -49,92 +49,118 @@ class RtInterface:
         self.packet_state = 'header'
         self.logger.info("RtInterface Constructed")
         self.raw_data = ''
+        self.packet_index = 0
         # self.write_thread.start(self)
 
     def parse_rt_msg(self, msg):
         self.logger.debug("Raw Msg: {}".format(msg))
         header_plus_length_size = 2 + 4
         payload_size = 20
+        odom_packet_size = 26
+        imu_packet_size = 52
         complete_packet_size = header_plus_length_size + payload_size
         msg_bytearray = msg
         msg_len = len(msg)
         got_complete_packet = False
+
         if msg_len == 0:
             self.logger.info("No data in the msg")
         self.logger.info('chunk size: {}'.format(msg_len))
         if self.packet_state == 'header':
-            if msg_bytearray[0] == '\xfd' and msg_bytearray[1] == '\xfd':
+            if msg_bytearray[self.packet_index] == '\xfd' and msg_bytearray[self.packet_index] == '\xfd':
                 self.packet_state = 'payload_size'
+                self.packet_index += 2
             else:
                 self.logger.error("header: {}, junk request".format(ord(msg_bytearray[0])))
 
         if self.packet_state == 'payload_size':
             if msg_len >= header_plus_length_size:
-                payload_length = struct.unpack('<I', msg_bytearray[2:6])[0]
+                payload_length = struct.unpack('<I', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
+                self.packet_index += 4
                 self.logger.info('Payload length: {}'.format(payload_length))
                 self.packet_state = 'payload'
 
         if self.packet_state == 'payload':
 
-            if msg_len >= complete_packet_size :
+            if msg_len >= payload_length:
                 self.odom_data.header.stamp = rospy.Time.now()
 
-                packet_id = struct.unpack('<h', msg_bytearray[6:8])[0]
+                packet_id = struct.unpack('<I', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
+                self.packet_index += 4
                 self.logger.info("Packet ID: {}".format(packet_id))
                 if packet_id == 2:
-                    pose_x = struct.unpack('<f', msg_bytearray[8:12])[0] / 100.0
-                    pose_y = struct.unpack('<f', msg_bytearray[12:16])[0] / 100.0
-                    pose_theta = struct.unpack('<f', msg_bytearray[16:20])[0]
-                    twist_linear = struct.unpack('<f', msg_bytearray[20:24])[0] / 100.0
-                    twist_angular = struct.unpack('<f', msg_bytearray[24:28])[0]
+                    if msg_len >= odom_packet_size:
+                        pose_x = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0] / 100.0
+                        self.packet_index += 4
+                        pose_y = struct.unpack('<f', msg_bytearray[self.packet_index :self.packet_index + 4])[0] / 100.0
+                        self.packet_index += 4
+                        pose_theta = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
+                        self.packet_index += 4
+                        twist_linear = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0] / 100.0
+                        self.packet_index += 4
+                        twist_angular = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
+                        self.packet_index += 4
 
-                    self.odom_data.pose.pose.position.x = pose_x
-                    self.odom_data.pose.pose.position.y = pose_y
-                    self.odom_data.pose.pose.position.z = 0.0
+                        self.odom_data.pose.pose.position.x = pose_x
+                        self.odom_data.pose.pose.position.y = pose_y
+                        self.odom_data.pose.pose.position.z = 0.0
 
-                    odom_quat_trans = quaternion_from_euler(0.0, 0.0, math.radians(pose_theta))
+                        odom_quat_trans = quaternion_from_euler(0.0, 0.0, math.radians(pose_theta))
 
-                    self.odom_data.pose.pose.orientation.x = odom_quat_trans[0]
-                    self.odom_data.pose.pose.orientation.y = odom_quat_trans[1]
-                    self.odom_data.pose.pose.orientation.z = odom_quat_trans[2]
-                    self.odom_data.pose.pose.orientation.w = odom_quat_trans[3]
+                        self.odom_data.pose.pose.orientation.x = odom_quat_trans[0]
+                        self.odom_data.pose.pose.orientation.y = odom_quat_trans[1]
+                        self.odom_data.pose.pose.orientation.z = odom_quat_trans[2]
+                        self.odom_data.pose.pose.orientation.w = odom_quat_trans[3]
 
-                    self.odom_data.twist.twist.linear.x = twist_linear
-                    self.odom_data.twist.twist.linear.y = 0.0
-                    self.odom_data.twist.twist.linear.z = 0.0
+                        self.odom_data.twist.twist.linear.x = twist_linear
+                        self.odom_data.twist.twist.linear.y = 0.0
+                        self.odom_data.twist.twist.linear.z = 0.0
 
-                    self.odom_data.twist.twist.angular.x = 0.0
-                    self.odom_data.twist.twist.angular.y = 0.0
-                    self.odom_data.twist.twist.angular.z = twist_angular
+                        self.odom_data.twist.twist.angular.x = 0.0
+                        self.odom_data.twist.twist.angular.y = 0.0
+                        self.odom_data.twist.twist.angular.z = twist_angular
 
-                    got_complete_packet = True
-                    self.logger.info("Got Odometry Data")
-                    self.logger.info("position: [x: {}, y: {}, theta: {}]".format(pose_x, pose_y, pose_theta) )
-                    self.logger.info("twist: [lin: {}, ang: {}]".format(twist_linear, twist_angular))
+                        got_complete_packet = True
+                        self.packet_index = 0
+                        self.logger.info("Got Odometry Data")
+                        self.logger.info("position: [x: {}, y: {}, theta: {}]".format(pose_x, pose_y, pose_theta) )
+                        self.logger.info("twist: [lin: {}, ang: {}]".format(twist_linear, twist_angular))
 
                 if packet_id == 3:
-                    timestamp = struct.unpack('<I', msg_bytearray[8:12])[0]
-                    roll = struct.unpack('<f', msg_bytearray[12:16])[0]
-                    pitch = struct.unpack('<f', msg_bytearray[16:20])[0]
-                    yaw = struct.unpack('<f', msg_bytearray[20:24])[0] / 100.0
-                    ang_vel_x = struct.unpack('<f', msg_bytearray[28:32])[0]
-                    ang_vel_y = struct.unpack('<f', msg_bytearray[32:36])[0]
-                    ang_vel_z = struct.unpack('<f', msg_bytearray[36:40])[0]
-                    lin_acc_x = struct.unpack('<f', msg_bytearray[40:44])[0]
-                    lin_acc_y = struct.unpack('<f', msg_bytearray[44:48])[0]
-                    lin_acc_z = struct.unpack('<f', msg_bytearray[48:52])[0]
+                    if msg_len >= imu_packet_size:
+                        timestamp = struct.unpack('<I', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
+                        self.packet_index += 4
+                        roll = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
+                        self.packet_index += 4
+                        pitch = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
+                        self.packet_index += 4
+                        yaw = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0] / 100.0
+                        self.packet_index += 4
+                        ang_vel_x = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
+                        self.packet_index += 4
+                        ang_vel_y = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
+                        self.packet_index += 4
+                        ang_vel_z = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
+                        self.packet_index += 4
+                        lin_acc_x = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
+                        self.packet_index += 4
+                        lin_acc_y = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
+                        self.packet_index += 4
+                        lin_acc_z = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
+                        self.packet_index += 4
 
-                    odom_quat_trans = quaternion_from_euler(math.radians(roll), math.radians(pitch), math.radians(yaw))
-                    self.imu_data.header.stamp = rospy.Time.now()
-                    self.imu_data.orientation = odom_quat_trans
-                    self.imu_data.angular_velocity = [ang_vel_x, ang_vel_y, ang_vel_z]
-                    self.imu_data.linear_acceleration = [lin_acc_x, lin_acc_y, lin_acc_z]
+                        odom_quat_trans = quaternion_from_euler(math.radians(roll), math.radians(pitch), math.radians(yaw))
+                        self.imu_data.header.stamp = rospy.Time.now()
+                        self.imu_data.orientation = odom_quat_trans
+                        self.imu_data.angular_velocity = [ang_vel_x, ang_vel_y, ang_vel_z]
+                        self.imu_data.linear_acceleration = [lin_acc_x, lin_acc_y, lin_acc_z]
 
-                    got_complete_packet = True
-                    self.logger.info("Got IMU Data")
-                    self.logger.info("orientation: [roll: {}, pitch: {}, yaw: {}]".format(roll, pitch, yaw))
-                    self.imu_pub.publish(self.imu_data)
-                    self.logger.info("Published IMU Data")
+                        got_complete_packet = True
+                        self.packet_index = 0
+                        self.logger.info("Got IMU Data")
+                        self.logger.info("orientation: [roll: {}, pitch: {}, yaw: {}]".format(roll, pitch, yaw))
+                        self.imu_pub.publish(self.imu_data)
+                        self.logger.info("Published IMU Data")
 
                 self.packet_state == 'header'
                 self.logger.info("Got complete packet")
