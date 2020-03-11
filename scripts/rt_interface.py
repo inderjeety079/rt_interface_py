@@ -103,6 +103,9 @@ class RtInterface:
                         twist_angular = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
                         self.packet_index += 4
 
+                        self.odom_data.header.stamp = rospy.Time.now()
+                        self.odom_data.header.frame_id = "odom"
+                        self.odom_data.child_frame_id = "base_footprint"
                         self.odom_data.pose.pose.position.x = pose_x
                         self.odom_data.pose.pose.position.y = pose_y
                         self.odom_data.pose.pose.position.z = 0.0
@@ -140,7 +143,7 @@ class RtInterface:
                         self.packet_index += 4
                         pitch = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
                         self.packet_index += 4
-                        yaw = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0] / 100.0
+                        yaw = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
                         self.packet_index += 4
                         ang_vel_x = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
                         self.packet_index += 4
@@ -168,7 +171,9 @@ class RtInterface:
                         self.logger.info("Got complete packet")
                         self.logger.info("Got IMU Data")
                         self.logger.info("orientation: [roll: {}, pitch: {}, yaw: {}]".format(roll, pitch, yaw))
-                        self.imu_pub.publish(self.imu_data)
+                        self.logger.info("angular_velocity : {}".format(self.imu_data.angular_velocity[0]))
+                        self.logger.info("linear_acceleration : {}".format(self.imu_data.linear_acceleration))
+                        self.publish_imu_data()
                         self.logger.info("Published IMU Data")
 
                 else:
