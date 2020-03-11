@@ -67,6 +67,7 @@ class RtInterface:
         if msg_len == 0:
             self.logger.info("No data in the msg")
         self.logger.info('chunk size: {}'.format(msg_len))
+        self.logger.info('packet_state: {}'.format(self.packet_state))
         if self.packet_state == 'header':
             if msg_bytearray[self.packet_index] == '\xfd' and msg_bytearray[self.packet_index] == '\xfd':
                 self.packet_state = 'payload_size'
@@ -74,14 +75,14 @@ class RtInterface:
             else:
                 self.logger.error("header: {}, junk request".format(ord(msg_bytearray[0])))
 
-        if self.packet_state == 'payload_size':
+        elif self.packet_state == 'payload_size':
             if msg_len >= header_plus_length_size:
                 self.payload_length = struct.unpack('<I', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
                 self.packet_index += 4
                 self.logger.info('Payload length: {}'.format(self.payload_length))
                 self.packet_state = 'payload'
 
-        if self.packet_state == 'payload':
+        elif self.packet_state == 'payload':
 
             if msg_len >= self.payload_length:
                 self.odom_data.header.stamp = rospy.Time.now()
@@ -170,7 +171,7 @@ class RtInterface:
                 else:
                     got_complete_packet = False
                     self.packet_index = 0
-                    self.logger.info("Got complete packet")
+                    self.logger.info("Got incomplete packet")
                     self.packet_state == 'header'
 
 
