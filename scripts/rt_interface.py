@@ -7,6 +7,7 @@ import sys
 from  threading import Thread, Event
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import Quaternion
 from sensor_msgs.msg import Imu
 import traceback
 # from tf2_ros import TransformBroadcaster
@@ -161,9 +162,16 @@ class RtInterface:
                         odom_quat_trans = quaternion_from_euler(math.radians(roll), math.radians(pitch), math.radians(yaw))
                         self.imu_data.header.stamp = rospy.Time.now()
                         self.imu_data.header.frame_id = "imu_link"
-                        self.imu_data.orientation = odom_quat_trans
-                        self.imu_data.angular_velocity = [ang_vel_x, ang_vel_y, ang_vel_z]
-                        self.imu_data.linear_acceleration = [lin_acc_x, lin_acc_y, lin_acc_z]
+                        self.imu_data.orientation.x = odom_quat_trans[0]
+                        self.imu_data.orientation.y = odom_quat_trans[1]
+                        self.imu_data.orientation.z = odom_quat_trans[2]
+                        self.imu_data.orientation.w = odom_quat_trans[3]
+                        self.imu_data.angular_velocity.x = ang_vel_x
+                        self.imu_data.angular_velocity.y = ang_vel_y
+                        self.imu_data.angular_velocity.z = ang_vel_z
+                        self.imu_data.linear_acceleration.x = lin_acc_x
+                        self.imu_data.linear_acceleration.y = lin_acc_y
+                        self.imu_data.linear_acceleration.z = lin_acc_z
 
                         got_complete_packet = True
                         self.packet_index = 0
@@ -254,6 +262,7 @@ class RtInterface:
         self.tf_broadcaster.sendTransform(self.odom_to_bl_msg)
 
     def publish_imu_data(self):
+        self.logger.info("Publishing IMU Data")
         self.imu_pub.publish(self.imu_data)
 
 def main():
