@@ -129,6 +129,8 @@ class RtInterface:
                         self.logger.info("Got Odometry Data")
                         self.logger.info("position: [x: {}, y: {}, theta: {}]".format(pose_x, pose_y, pose_theta) )
                         self.logger.info("twist: [lin: {}, ang: {}]".format(twist_linear, twist_angular))
+                        self.publish_odom_data()
+                        self.publish_tf()
 
                 elif packet_id == 3:
                     if msg_len >= imu_packet_size:
@@ -155,6 +157,7 @@ class RtInterface:
 
                         odom_quat_trans = quaternion_from_euler(math.radians(roll), math.radians(pitch), math.radians(yaw))
                         self.imu_data.header.stamp = rospy.Time.now()
+                        self.imu_data.header.frame_id = "imu_link"
                         self.imu_data.orientation = odom_quat_trans
                         self.imu_data.angular_velocity = [ang_vel_x, ang_vel_y, ang_vel_z]
                         self.imu_data.linear_acceleration = [lin_acc_x, lin_acc_y, lin_acc_z]
@@ -197,14 +200,17 @@ class RtInterface:
                 self.connection_handle.recv_msg()
                 self.logger.info("Recvd msg:{}".format(self.connection_handle.raw_data))
                 status = self.parse_rt_msg(self.connection_handle.raw_data)
-                if status:
-                    self.publish_odom_data()
-                    self.publish_tf()
+                # if status:
+                    # self.publish_odom_data()
+                    # self.publish_tf()
             except KeyboardInterrupt as key_interrupt:
                 self.sigterm_event.set()
                 self.logger.debug("keyboard interrupt. Exiting process thread")
             except Exception as ex:
                 self.logger.info("Exception: {}. Exiting process thread".format(ex))
+                self.connection_handle.raw_data = ''
+                self.packet_state = 'header'
+                self.packet_index = 0
                 time.sleep(0.1)
                 # sys.exit(-1)
 
@@ -242,6 +248,8 @@ class RtInterface:
         self.odom_to_bl_msg.header.stamp = rospy.Time.now()
         self.tf_broadcaster.sendTransform(self.odom_to_bl_msg)
 
+    def publish_imu_data(self):
+        self.imu_pub.publish(self.imu_data)
 
 def main():
     rospy.init_node("rt_interface")
