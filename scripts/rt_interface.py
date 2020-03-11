@@ -123,11 +123,13 @@ class RtInterface:
 
                         got_complete_packet = True
                         self.packet_index = 0
+                        self.packet_state == 'header'
+                        self.logger.info("Got complete packet")
                         self.logger.info("Got Odometry Data")
                         self.logger.info("position: [x: {}, y: {}, theta: {}]".format(pose_x, pose_y, pose_theta) )
                         self.logger.info("twist: [lin: {}, ang: {}]".format(twist_linear, twist_angular))
 
-                if packet_id == 3:
+                elif packet_id == 3:
                     if msg_len >= imu_packet_size:
                         timestamp = struct.unpack('<I', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
                         self.packet_index += 4
@@ -158,13 +160,20 @@ class RtInterface:
 
                         got_complete_packet = True
                         self.packet_index = 0
+                        self.packet_state == 'header'
+                        self.logger.info("Got complete packet")
                         self.logger.info("Got IMU Data")
                         self.logger.info("orientation: [roll: {}, pitch: {}, yaw: {}]".format(roll, pitch, yaw))
                         self.imu_pub.publish(self.imu_data)
                         self.logger.info("Published IMU Data")
 
-                self.packet_state == 'header'
-                self.logger.info("Got complete packet")
+                else:
+                    got_complete_packet = False
+                    self.packet_index = 0
+                    self.logger.info("Got complete packet")
+                    self.packet_state == 'header'
+
+
                 self.logger.info("Residual Msg: {}".format(msg_bytearray))
                 msg = ''
                 self.connection_handle.raw_data = ''
