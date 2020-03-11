@@ -171,13 +171,17 @@ class RtInterface:
                 else:
                     got_complete_packet = False
                     self.packet_index = 0
-                    self.logger.info("Got incomplete packet")
+                    self.logger.info("Packet of Unknown packet ID received: {}. Looking for Header Now".format(packet_id))
                     self.packet_state == 'header'
 
 
                 self.logger.info("Residual Msg: {}".format(msg_bytearray))
                 msg = ''
                 self.connection_handle.raw_data = ''
+
+            else:
+                got_complete_packet = False
+                self.logger.info("Incomplete packet received. Continuing with previous parser state: {}".format(self.packet_state))
 
         return got_complete_packet
 
