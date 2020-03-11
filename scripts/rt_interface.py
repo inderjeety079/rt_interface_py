@@ -58,7 +58,7 @@ class RtInterface:
         header_plus_length_size = 2 + 4
         payload_size = 20
         odom_packet_size = 26
-        imu_packet_size = 52
+        imu_packet_size = 54
         complete_packet_size = header_plus_length_size + payload_size
         msg_bytearray = msg
         msg_len = len(msg)
@@ -124,7 +124,7 @@ class RtInterface:
 
                         got_complete_packet = True
                         self.packet_index = 0
-                        self.packet_state == 'header'
+                        self.packet_state ='header'
                         self.logger.info("Got complete packet")
                         self.logger.info("Got Odometry Data")
                         self.logger.info("position: [x: {}, y: {}, theta: {}]".format(pose_x, pose_y, pose_theta) )
@@ -161,7 +161,7 @@ class RtInterface:
 
                         got_complete_packet = True
                         self.packet_index = 0
-                        self.packet_state == 'header'
+                        self.packet_state = 'header'
                         self.logger.info("Got complete packet")
                         self.logger.info("Got IMU Data")
                         self.logger.info("orientation: [roll: {}, pitch: {}, yaw: {}]".format(roll, pitch, yaw))
@@ -172,7 +172,7 @@ class RtInterface:
                     got_complete_packet = False
                     self.packet_index = 0
                     self.logger.info("Packet of Unknown packet ID received: {}. Looking for Header Now".format(packet_id))
-                    self.packet_state == 'header'
+                    self.packet_state = 'header'
 
 
                 self.logger.info("Residual Msg: {}".format(msg_bytearray))
