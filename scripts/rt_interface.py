@@ -350,7 +350,7 @@ def main():
     logging.basicConfig(format='[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s', level=logging.DEBUG,
                         filename='rt_interface.log')
     logging.debug('Logger created')
-    rt_interface = RtInterface('', 5102)
+    rt_interface = RtInterface('10.3.1.59', 5102)
 
     print("Starting read thread")
     rt_interface.read_thread.start()
