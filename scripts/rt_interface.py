@@ -319,9 +319,14 @@ class RtInterface:
         if packet_id == 3:
             payload_size = 24
             packet_length = min_packet_size + payload_size
-            length_str = struct.pack('<I',packet_length)
+            length_str = struct.pack('<I', packet_length)
             cmd_vel = copy.deepcopy(self.cmd_vel_data)
-            payload_str = struct.pack('<d<d<d<d<d<d', cmd_vel)
+            payload_str = struct.pack('<d', cmd_vel.linear.x)
+            payload_str += struct.pack('<d', cmd_vel.linear.y)
+            payload_str += struct.pack('<d', cmd_vel.linear.z)
+            payload_str += struct.pack('<d', cmd_vel.angular.x)
+            payload_str += struct.pack('<d', cmd_vel.angular.y)
+            payload_str += struct.pack('<d', cmd_vel.angular.z)
             checksum_data = 0
             checksum_str = struct.pack('<I', checksum_data)
 

@@ -6,6 +6,7 @@ import struct
 import logging
 import sys
 import Queue
+import copy
 
 
 
@@ -59,7 +60,8 @@ class UdpServer:
         # return data
 
     def send_msg(self, msg, length):
-        self.socket.send_to(msg, (self.hostname, self.port))
+        msg_str = copy.deepcopy(msg)
+        self.socket.send_to(msg_str, (self.hostname, self.port))
 
     def close_socket(self):
         self.logger.info("Closing UDP socket: {}".format(self.hostname, self.port))
