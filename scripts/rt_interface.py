@@ -305,6 +305,7 @@ class RtInterface:
         self.logger.info("Sending cmd_vel to RT")
         cmd_vel_id = 3
         msg_str = self.pack_rt_msg(cmd_vel_id)
+        self.logger.info("msg_str: {}".format(msg_str))
         self.connection_handle.send_msg(msg_str, len(msg_str))
 
     def pack_rt_msg(self, packet_id):
@@ -341,6 +342,8 @@ def main():
 
     print("Starting read thread")
     rt_interface.read_thread.start()
+    print("Starting write thread")
+    rt_interface.write_thread.start()
 
     print("Created Rt Interface")
     print("Starting to spin")
