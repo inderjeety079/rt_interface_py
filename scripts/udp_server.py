@@ -5,7 +5,7 @@ import json
 import struct
 import logging
 import sys
-# import Queue
+import Queue
 
 
 
@@ -15,6 +15,7 @@ class UdpServer:
         self.hostname = hostname
         self.port = port
         self.max_pending_connections = max_connections
+        # self.raw_data = Queue()
         self.raw_data = ''
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -51,12 +52,12 @@ class UdpServer:
         # request = self.recv_batch(client_sock)
         #data = client.recv(4096)
         data, address = self.socket.recvfrom(4096)
-        self.raw_data = self.raw_data + data
+        self.raw_data.append(data)
         chunk_size = len(data)
         self.logger.info("received data from : {}, {}: data: {}".format(address[0], address[1], data))
         # return data
 
-    def send_msg(self, client, msg, length):
+    def send_msg(self, msg, length):
         self.socket.send_to(msg, (self.hostname, self.port))
 
     def close_socket(self):

@@ -6,6 +6,7 @@ import sys
 # import Queue
 from  threading import Thread, Event
 from nav_msgs.msg import Odometry
+from geometry_msgs.msg import Twist
 from geometry_msgs.msg import TransformStamped
 from geometry_msgs.msg import Quaternion
 from sensor_msgs.msg import Imu
@@ -32,12 +33,17 @@ class RtInterface:
         self.connection_handle = UdpServer(self.hostname, self.port, 1)
         print("Assigning read thread handler")
         self.read_thread = Thread(None, self.process_rt_msg, "rt_interface_read_thread")
-        # self.publish_thread = Thread(self.send_msg_to_rt)
+        self.write_thread = Thread(None, self.write_to_rt, "rt_interface_write_thread")
 
         self.odom_pub = rospy.Publisher('/encoder_odometry/odom', Odometry, queue_size=10)
         self.tf_broadcaster = tf2_ros.TransformBroadcaster()
         self.imu_pub = rospy.Publisher('/xsens/imu', Imu, queue_size=1)
+        self.cmd_vel_subs = rospy.Subscriber('/cmd_vel', Twist, self.cmd_vel_cb, queue_size=1)
+        self.cmd_vel_data = Twist()
         self.sigterm_event = Event()
+        self.write_event = Event()
+        self.cmd_vel_event = Event()
+        self.dummy_event = Event()
 
         self.odom_to_bl_msg = TransformStamped()
         self.odom_to_bl_msg.header.frame_id = "odom"
@@ -46,6 +52,9 @@ class RtInterface:
         self.odom_data = Odometry()
         self.imu_data = Imu()
         self.sigterm_event.clear()
+        self.cmd_vel_event.clear()
+        self.write_event.clear()
+        self.dummy_event.clear()
 
         self.packet_state = 'header'
         self.logger.info("RtInterface Constructed")
@@ -70,6 +79,7 @@ class RtInterface:
         self.logger.info('chunk size: {}'.format(msg_len))
         self.logger.info('packet_state: {}'.format(self.packet_state))
         if self.packet_state == 'header':
+
             if msg_bytearray[self.packet_index] == '\xfd' and msg_bytearray[self.packet_index] == '\xfd':
                 self.packet_state = 'payload_size'
                 self.packet_index += 2
@@ -93,6 +103,8 @@ class RtInterface:
                 self.logger.info("Packet ID: {}".format(packet_id))
                 if packet_id == 2:
                     if msg_len >= odom_packet_size:
+                        timestamp = struct.unpack('<I', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
+                        self.packet_index += 4
                         pose_x = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0] / 100.0
                         self.packet_index += 4
                         pose_y = struct.unpack('<f', msg_bytearray[self.packet_index :self.packet_index + 4])[0] / 100.0
@@ -179,7 +191,7 @@ class RtInterface:
                         self.logger.info("Got complete packet")
                         self.logger.info("Got IMU Data")
                         self.logger.info("orientation: [roll: {}, pitch: {}, yaw: {}]".format(roll, pitch, yaw))
-                        self.logger.info("angular_velocity : {}".format(self.imu_data.angular_velocity[0]))
+                        self.logger.info("angular_velocity : {}".format(self.imu_data.angular_velocity))
                         self.logger.info("linear_acceleration : {}".format(self.imu_data.linear_acceleration))
                         self.publish_imu_data()
                         self.logger.info("Published IMU Data")
@@ -264,6 +276,61 @@ class RtInterface:
     def publish_imu_data(self):
         self.logger.info("Publishing IMU Data")
         self.imu_pub.publish(self.imu_data)
+
+    def cmd_vel_cb(self, cmd_vel):
+        self.logger.info("Received cmd_vel: linear: {} m/s angular: {} rad/s".format(cmd_vel.linear.x, cmd_vel.angular.z))
+        self.cmd_vel_data = cmd_vel
+        self.cmd_vel_event.set()
+        self.write_event.set()
+
+    def write_to_rt(self):
+        while self.keep_alive and not self.sigterm_event.is_set():
+            self.write_event.wait()
+            self.logger.info("Write event wait exit \n")
+            if self.cmd_vel_event.is_set():
+                self.send_cmd_vel()
+                self.cmd_vel_event.clear()
+
+            elif self.dummy_event.is_set():
+                self.logger.info("Dummy Event. Clearing event flag")
+                self.dummy_event.clear()
+
+            else:
+                self.logger.info("No sub-event")
+
+            self.write_event.clear()
+            self.logger.info("Clearing write event")
+
+    def send_cmd_vel(self):
+        self.logger.info("Sending cmd_vel to RT")
+        cmd_vel_id = 3
+        msg_str = self.pack_rt_msg(cmd_vel_id)
+        self.connection_handle.send_msg(msg_str, len(msg_str))
+
+    def pack_rt_msg(self, packet_id):
+        header = '\xfd\xfd'
+        min_packet_size = 14
+        packet_id_str = struct.pack('<I', packet_id)
+        length_str = ''
+        payload_str = ''
+        checksum_str = ''
+
+        if packet_id == 3:
+            payload_size = 24
+            packet_length = min_packet_size + payload_size
+            length_str = struct.pack('<I',packet_length)
+            payload_str = struct.pack("<f<f<f<f<f<f", self.cmd_vel_data)
+            checksum_data = 0
+            checksum_str = struct.pack('<I', checksum_data)
+
+        packet = header + length_str + packet_id_str + payload_str + checksum_str
+
+        return packet
+
+
+
+
+
 
 def main():
     rospy.init_node("rt_interface")
