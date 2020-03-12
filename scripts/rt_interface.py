@@ -320,7 +320,8 @@ class RtInterface:
             payload_size = 24
             packet_length = min_packet_size + payload_size
             length_str = struct.pack('<I',packet_length)
-            payload_str = struct.pack("<f<f<f<f<f<f", self.cmd_vel_data)
+            cmd_vel = copy.deepcopy(self.cmd_vel_data)
+            payload_str = struct.pack('<d<d<d<d<d<d', cmd_vel)
             checksum_data = 0
             checksum_str = struct.pack('<I', checksum_data)
 
