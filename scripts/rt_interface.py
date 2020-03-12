@@ -303,18 +303,21 @@ class RtInterface:
 
     def send_cmd_vel(self):
         self.logger.info("Sending cmd_vel to RT")
+        msg_str = ''
         cmd_vel_id = 3
-        msg_str = self.pack_rt_msg(cmd_vel_id)
+
+        self.pack_rt_msg(cmd_vel_id, msg_str)
         self.logger.info("msg_str: {}".format(msg_str))
         self.connection_handle.send_msg(msg_str, len(msg_str))
 
-    def pack_rt_msg(self, packet_id):
+    def pack_rt_msg(self, packet_id, packet):
         header = '\xfd\xfd'
         min_packet_size = 14
         packet_id_str = struct.pack('<I', packet_id)
         length_str = ''
         payload_str = ''
         checksum_str = ''
+        packet = ''
 
         if packet_id == 3:
             payload_size = 24
@@ -332,7 +335,7 @@ class RtInterface:
 
         packet = header + length_str + packet_id_str + payload_str + checksum_str
 
-        return packet
+        # return packet
 
 
 
