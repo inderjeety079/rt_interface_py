@@ -61,7 +61,7 @@ class UdpServer:
 
     def send_msg(self, msg, length):
         msg_str = copy.deepcopy(msg)
-        self.socket.send_to(msg_str, (self.hostname, self.port))
+        self.socket.sendto(msg_str, (self.hostname, self.port))
 
     def close_socket(self):
         self.logger.info("Closing UDP socket: {}".format(self.hostname, self.port))
