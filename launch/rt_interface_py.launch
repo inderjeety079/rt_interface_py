@@ -1,5 +1,7 @@
 <launch>
-    <node name="rt_interface_py" pkg="rt_interface_py" type="rt_interface.py" />
+    <node name="rt_interface_py" pkg="rt_interface_py" type="rt_interface.py">
+        <remap from="encoder_odometry/odom" to="diff_drive_controller/odom"/>
+    </node>
     <node pkg="tf" type="static_transform_publisher" name="imu_link_tf" args="0.0 0.0 0.0 0.0 0.0 0.0 1.0 base_footprint imu_link 100" />
     <node pkg="tf" type="static_transform_publisher" name="map_to_odom_tf" args="0.0 0.0 0.0 0.0 0.0 0.0 1.0 map odom 100" />
 </launch>

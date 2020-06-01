@@ -3,7 +3,7 @@ import rospy
 from udp_server import UdpServer
 import logging
 import sys
-# import Queue
+import Queue
 from  threading import Thread, Event
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist
@@ -31,6 +31,7 @@ class RtInterface:
         self.port = port
         self.keep_alive = True
         self.connection_handle = UdpServer(self.hostname, self.port, 1)
+        self.rt_client_ip = '10.3.1.59'
         print("Assigning read thread handler")
         self.read_thread = Thread(None, self.process_rt_msg, "rt_interface_read_thread")
         self.write_thread = Thread(None, self.write_to_rt, "rt_interface_write_thread")
@@ -48,6 +49,7 @@ class RtInterface:
         self.odom_to_bl_msg = TransformStamped()
         self.odom_to_bl_msg.header.frame_id = "odom"
         self.odom_to_bl_msg.child_frame_id = "base_footprint"
+        self.rt_recv_queue = Queue.Queue()
 
         self.odom_data = Odometry()
         self.imu_data = Imu()
@@ -67,20 +69,26 @@ class RtInterface:
         self.logger.debug("Raw Msg: {}".format(msg))
         header_plus_length_size = 2 + 4
         payload_size = 20
-        odom_packet_size = 26
-        imu_packet_size = 54
+        odom_packet_size = 38
+        imu_packet_size = 78
         complete_packet_size = header_plus_length_size + payload_size
-        msg_bytearray = msg
-        msg_len = len(msg)
+        self.logger.info("msg: {}".format(msg))
+        msg_bytearray = bytes()
+        msg_bytearray += msg
+        print("msg_bytearray: ")
+        print(msg_bytearray)
+        #self.logger.info("msg_bytearray : {}".format(msg_bytearray))
+        msg_len = len(msg_bytearray)
         got_complete_packet = False
 
         if msg_len == 0:
             self.logger.info("No data in the msg")
         self.logger.info('chunk size: {}'.format(msg_len))
         self.logger.info('packet_state: {}'.format(self.packet_state))
+        
         if self.packet_state == 'header':
 
-            if msg_bytearray[self.packet_index] == '\xfd' and msg_bytearray[self.packet_index] == '\xfd':
+            if msg_bytearray[self.packet_index] == 253 and msg_bytearray[self.packet_index] == 253:
                 self.packet_state = 'payload_size'
                 self.packet_index += 2
             else:
@@ -109,7 +117,7 @@ class RtInterface:
                         self.packet_index += 4
                         pose_y = struct.unpack('<f', msg_bytearray[self.packet_index :self.packet_index + 4])[0] / 100.0
                         self.packet_index += 4
-                        pose_theta = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
+                        pose_theta = -struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
                         self.packet_index += 4
                         twist_linear = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0] / 100.0
                         self.packet_index += 4
@@ -123,7 +131,7 @@ class RtInterface:
                         self.odom_data.pose.pose.position.y = pose_y
                         self.odom_data.pose.pose.position.z = 0.0
 
-                        odom_quat_trans = quaternion_from_euler(0.0, 0.0, math.radians(pose_theta))
+                        odom_quat_trans = quaternion_from_euler(0.0, 0.0, pose_theta)
 
                         self.odom_data.pose.pose.orientation.x = odom_quat_trans[0]
                         self.odom_data.pose.pose.orientation.y = odom_quat_trans[1]
@@ -141,7 +149,8 @@ class RtInterface:
                         got_complete_packet = True
                         self.packet_index = 0
                         self.packet_state ='header'
-                        self.logger.info("Got complete packet")
+                        msg_bytearray = ''
+                        #self.logger.info("Got complete packet")
                         self.logger.info("Got Odometry Data")
                         self.logger.info("position: [x: {}, y: {}, theta: {}]".format(pose_x, pose_y, pose_theta) )
                         self.logger.info("twist: [lin: {}, ang: {}]".format(twist_linear, twist_angular))
@@ -188,28 +197,30 @@ class RtInterface:
                         got_complete_packet = True
                         self.packet_index = 0
                         self.packet_state = 'header'
-                        self.logger.info("Got complete packet")
+                        #self.logger.info("Got complete packet")
                         self.logger.info("Got IMU Data")
-                        self.logger.info("orientation: [roll: {}, pitch: {}, yaw: {}]".format(roll, pitch, yaw))
-                        self.logger.info("angular_velocity : {}".format(self.imu_data.angular_velocity))
-                        self.logger.info("linear_acceleration : {}".format(self.imu_data.linear_acceleration))
+                        msg_bytearray = ''
+                        #self.logger.info("orientation: [roll: {}, pitch: {}, yaw: {}]".format(roll, pitch, yaw))
+                        #self.logger.info("angular_velocity : {}".format(self.imu_data.angular_velocity))
+                        #self.logger.info("linear_acceleration : {}".format(self.imu_data.linear_acceleration))
                         self.publish_imu_data()
-                        self.logger.info("Published IMU Data")
+                        #self.logger.info("Published IMU Data")
 
                 else:
                     got_complete_packet = False
                     self.packet_index = 0
+                    msg_bytearray = ''
                     self.logger.info("Packet of Unknown packet ID received: {}. Looking for Header Now".format(packet_id))
                     self.packet_state = 'header'
 
-
                 self.logger.info("Residual Msg: {}".format(msg_bytearray))
-                msg = ''
-                self.connection_handle.raw_data = ''
+                #msg = ''
+                #self.connection_handle.raw_data = ''
 
             else:
-                got_complete_packet = False
-                self.logger.info("Incomplete packet received. Continuing with previous parser state: {}".format(self.packet_state))
+                #got_complete_packet = False
+                self.packet_state = 'header'
+                #self.logger.info("Incomplete packet received. Continuing with previous parser state: {}".format(self.packet_state))
 
         return got_complete_packet
 
@@ -221,10 +232,11 @@ class RtInterface:
 
         while self.keep_alive and not self.sigterm_event.is_set():
             try:
-                self.logger.info("Waiting for the data to arrive in rt interface")
+                #self.logger.info("Waiting for the data to arrive in rt interface")
                 self.connection_handle.recv_msg()
-                self.logger.info("Recvd msg:{}".format(self.connection_handle.raw_data))
-                status = self.parse_rt_msg(self.connection_handle.raw_data)
+                #self.logger.info("Recvd msg:{}".format(self.connection_handle.raw_data))
+                while not self.connection_handle.recv_queue.empty() : 
+                    status = self.parse_rt_msg(self.connection_handle.recv_queue.get())
                 # if status:
                     # self.publish_odom_data()
                     # self.publish_tf()
@@ -264,7 +276,7 @@ class RtInterface:
         odom_euler = euler_from_quaternion([odom_quat.x, odom_quat.y, odom_quat.z, odom_quat.w])
         roll = float(0.0)
         pitch = float(0.0)
-        odom_quat_trans = quaternion_from_euler(math.radians(roll), math.radians(pitch), math.radians(odom_euler[2]))
+        odom_quat_trans = quaternion_from_euler(roll, pitch, odom_euler[2])
 
         self.odom_to_bl_msg.transform.rotation.x = odom_quat_trans[0]
         self.odom_to_bl_msg.transform.rotation.y = odom_quat_trans[1]
@@ -274,11 +286,11 @@ class RtInterface:
         self.tf_broadcaster.sendTransform(self.odom_to_bl_msg)
 
     def publish_imu_data(self):
-        self.logger.info("Publishing IMU Data")
+        #self.logger.info("Publishing IMU Data")
         self.imu_pub.publish(self.imu_data)
 
     def cmd_vel_cb(self, cmd_vel):
-        self.logger.info("Received cmd_vel: linear: {} m/s angular: {} rad/s".format(cmd_vel.linear.x, cmd_vel.angular.z))
+        #self.logger.info("Received cmd_vel: linear: {} m/s angular: {} rad/s".format(cmd_vel.linear.x, cmd_vel.angular.z))
         self.cmd_vel_data = cmd_vel
         self.cmd_vel_event.set()
         self.write_event.set()
@@ -302,12 +314,12 @@ class RtInterface:
             self.logger.info("Clearing write event")
 
     def send_cmd_vel(self):
-        self.logger.info("Sending cmd_vel to RT")
+        #self.logger.info("Sending cmd_vel to RT")
         msg_str = ''
         cmd_vel_id = 3
         msg_str = copy.deepcopy(self.pack_rt_msg(cmd_vel_id))
         self.logger.info("msg_str: {}".format(msg_str))
-        self.connection_handle.send_msg(msg_str, len(msg_str))
+        self.connection_handle.send_msg(msg_str, len(msg_str), self.rt_client_ip)
 
     def pack_rt_msg(self, packet_id):
         header = '\xfd\xfd'
@@ -317,7 +329,7 @@ class RtInterface:
         payload_str = ''
         checksum_str = ''
         packet = ''
-        self.logger.info("Packing msg for packet id: {}".format(packet_id))
+        #self.logger.info("Packing msg for packet id: {}".format(packet_id))
 
 
         if packet_id == 3:
@@ -336,7 +348,7 @@ class RtInterface:
             self.logger.info("payload str: {}".format(payload_str))
 
         packet = header + length_str + packet_id_str + payload_str + checksum_str
-        self.logger.info("packet: {}".format(packet))
+        #self.logger.info("packet: {}".format(packet))
 
         return packet
 
@@ -350,7 +362,7 @@ def main():
     logging.basicConfig(format='[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s', level=logging.DEBUG,
                         filename='rt_interface.log')
     logging.debug('Logger created')
-    rt_interface = RtInterface('10.3.1.59', 5102)
+    rt_interface = RtInterface('10.3.1.1', 5102)
 
     print("Starting read thread")
     rt_interface.read_thread.start()
