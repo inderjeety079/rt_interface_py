@@ -20,6 +20,7 @@ from tf.transformations import euler_from_quaternion
 import copy
 import math
 from geometry_msgs.msg import Quaternion
+from nav_2_0_common_msgs import ResetOdom
 # from geometry_msgs.msg import Pose
 import struct
 import time
@@ -42,7 +43,7 @@ class RtInterface:
         self.tf_broadcaster = tf2_ros.TransformBroadcaster()
         self.imu_pub = rospy.Publisher('/xsens/imu', Imu, queue_size=1)
         self.cmd_vel_subs = rospy.Subscriber('/cmd_vel', Twist, self.cmd_vel_cb, queue_size=1)
-        self.reset_odom_subs = rospy.Subscriber('/reset_odom', bool, self.reset_odom_cb, queue_size=1)
+        self.reset_odom_subs = rospy.Subscriber('/reset_odom', ResetOdom, self.reset_odom_cb, queue_size=1)
         self.cmd_vel_data = Twist()
         self.sigterm_event = Event()
         self.write_event = Event()
