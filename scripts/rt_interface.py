@@ -2,8 +2,9 @@
 import rospy
 from udp_server import UdpServer
 import logging
+from collections import deque
 import sys
-import Queue
+# import Queue
 from  threading import Thread, Event
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist
@@ -28,15 +29,16 @@ class RtInterface:
     def __init__(self, hostname, port):
         self.logger = logging.getLogger('RtInterface')
         self.hostname = hostname
+        self.rt_hostname = '10.3.1.59'
+        self.send_port  = port
         self.port = port
         self.keep_alive = True
         self.connection_handle = UdpServer(self.hostname, self.port, 1)
-        self.rt_client_ip = '10.3.1.59'
         print("Assigning read thread handler")
         self.read_thread = Thread(None, self.process_rt_msg, "rt_interface_read_thread")
         self.write_thread = Thread(None, self.write_to_rt, "rt_interface_write_thread")
 
-        self.odom_pub = rospy.Publisher('/encoder_odometry/odom', Odometry, queue_size=10)
+        self.odom_pub = rospy.Publisher('/encoder/odom', Odometry, queue_size=1)
         self.tf_broadcaster = tf2_ros.TransformBroadcaster()
         self.imu_pub = rospy.Publisher('/xsens/imu', Imu, queue_size=1)
         self.cmd_vel_subs = rospy.Subscriber('/cmd_vel', Twist, self.cmd_vel_cb, queue_size=1)
@@ -49,7 +51,6 @@ class RtInterface:
         self.odom_to_bl_msg = TransformStamped()
         self.odom_to_bl_msg.header.frame_id = "odom"
         self.odom_to_bl_msg.child_frame_id = "base_footprint"
-        self.rt_recv_queue = Queue.Queue()
 
         self.odom_data = Odometry()
         self.imu_data = Imu()
@@ -58,169 +59,192 @@ class RtInterface:
         self.write_event.clear()
         self.dummy_event.clear()
 
-        self.packet_state = 'header'
+        self.packet_state = 'header1'
         self.logger.info("RtInterface Constructed")
         self.raw_data = ''
         self.packet_index = 0
         self.payload_length = 0
+        self.bytecount = 0
+        self.payload_bytearray = bytearray(512)
+        self.temp_bytearray = bytearray(12)
         # self.write_thread.start(self)
 
     def parse_rt_msg(self, msg):
         self.logger.debug("Raw Msg: {}".format(msg))
+        length_size = 4
         header_plus_length_size = 2 + 4
         payload_size = 20
-        odom_packet_size = 38
-        imu_packet_size = 78
+        odom_packet_size = 26
+        imu_packet_size = 42
         complete_packet_size = header_plus_length_size + payload_size
-        self.logger.info("msg: {}".format(msg))
-        msg_bytearray = bytes()
-        msg_bytearray += msg
-        print("msg_bytearray: ")
-        print(msg_bytearray)
-        #self.logger.info("msg_bytearray : {}".format(msg_bytearray))
-        msg_len = len(msg_bytearray)
+        msg_bytearray = msg
+        msg_len = len(self.connection_handle.data_buffer)
+        # msg_len = 0
+        # self.logger.info("msg len: {}".format(msg_len))
         got_complete_packet = False
 
         if msg_len == 0:
             self.logger.info("No data in the msg")
-        self.logger.info('chunk size: {}'.format(msg_len))
-        self.logger.info('packet_state: {}'.format(self.packet_state))
-        
-        if self.packet_state == 'header':
+        #self.logger.info('current msg size: {}'.format(msg_len))
 
-            if msg_bytearray[self.packet_index] == 253 and msg_bytearray[self.packet_index] == 253:
-                self.packet_state = 'payload_size'
-                self.packet_index += 2
-            else:
-                self.logger.error("header: {}, junk request".format(ord(msg_bytearray[0])))
+        bytes_left = msg_len
+        while bytes_left != 0:
 
-        elif self.packet_state == 'payload_size':
-            if msg_len >= header_plus_length_size:
-                self.payload_length = struct.unpack('<I', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
-                self.packet_index += 4
-                self.logger.info('Payload length: {}'.format(self.payload_length))
-                self.packet_state = 'payload'
+            byte = self.connection_handle.data_buffer.popleft()
+            bytes_left = len(self.connection_handle.data_buffer)
+            #self.logger.info('packet_state: {}, byte:{}'.format(self.packet_state, byte))
 
-        elif self.packet_state == 'payload':
-
-            if msg_len >= self.payload_length:
-                self.odom_data.header.stamp = rospy.Time.now()
-
-                packet_id = struct.unpack('<I', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
-                self.packet_index += 4
-                self.logger.info("Packet ID: {}".format(packet_id))
-                if packet_id == 2:
-                    if msg_len >= odom_packet_size:
-                        timestamp = struct.unpack('<I', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
-                        self.packet_index += 4
-                        pose_x = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0] / 100.0
-                        self.packet_index += 4
-                        pose_y = struct.unpack('<f', msg_bytearray[self.packet_index :self.packet_index + 4])[0] / 100.0
-                        self.packet_index += 4
-                        pose_theta = -struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
-                        self.packet_index += 4
-                        twist_linear = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0] / 100.0
-                        self.packet_index += 4
-                        twist_angular = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
-                        self.packet_index += 4
-
-                        self.odom_data.header.stamp = rospy.Time.now()
-                        self.odom_data.header.frame_id = "odom"
-                        self.odom_data.child_frame_id = "base_footprint"
-                        self.odom_data.pose.pose.position.x = pose_x
-                        self.odom_data.pose.pose.position.y = pose_y
-                        self.odom_data.pose.pose.position.z = 0.0
-
-                        odom_quat_trans = quaternion_from_euler(0.0, 0.0, pose_theta)
-
-                        self.odom_data.pose.pose.orientation.x = odom_quat_trans[0]
-                        self.odom_data.pose.pose.orientation.y = odom_quat_trans[1]
-                        self.odom_data.pose.pose.orientation.z = odom_quat_trans[2]
-                        self.odom_data.pose.pose.orientation.w = odom_quat_trans[3]
-
-                        self.odom_data.twist.twist.linear.x = twist_linear
-                        self.odom_data.twist.twist.linear.y = 0.0
-                        self.odom_data.twist.twist.linear.z = 0.0
-
-                        self.odom_data.twist.twist.angular.x = 0.0
-                        self.odom_data.twist.twist.angular.y = 0.0
-                        self.odom_data.twist.twist.angular.z = twist_angular
-
-                        got_complete_packet = True
-                        self.packet_index = 0
-                        self.packet_state ='header'
-                        msg_bytearray = ''
-                        #self.logger.info("Got complete packet")
-                        self.logger.info("Got Odometry Data")
-                        self.logger.info("position: [x: {}, y: {}, theta: {}]".format(pose_x, pose_y, pose_theta) )
-                        self.logger.info("twist: [lin: {}, ang: {}]".format(twist_linear, twist_angular))
-                        self.publish_odom_data()
-                        self.publish_tf()
-
-                elif packet_id == 3:
-                    if msg_len >= imu_packet_size:
-                        timestamp = struct.unpack('<I', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
-                        self.packet_index += 4
-                        roll = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
-                        self.packet_index += 4
-                        pitch = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
-                        self.packet_index += 4
-                        yaw = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
-                        self.packet_index += 4
-                        ang_vel_x = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
-                        self.packet_index += 4
-                        ang_vel_y = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
-                        self.packet_index += 4
-                        ang_vel_z = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
-                        self.packet_index += 4
-                        lin_acc_x = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
-                        self.packet_index += 4
-                        lin_acc_y = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
-                        self.packet_index += 4
-                        lin_acc_z = struct.unpack('<f', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
-                        self.packet_index += 4
-
-                        odom_quat_trans = quaternion_from_euler(math.radians(roll), math.radians(pitch), math.radians(yaw))
-                        self.imu_data.header.stamp = rospy.Time.now()
-                        self.imu_data.header.frame_id = "imu_link"
-                        self.imu_data.orientation.x = odom_quat_trans[0]
-                        self.imu_data.orientation.y = odom_quat_trans[1]
-                        self.imu_data.orientation.z = odom_quat_trans[2]
-                        self.imu_data.orientation.w = odom_quat_trans[3]
-                        self.imu_data.angular_velocity.x = ang_vel_x
-                        self.imu_data.angular_velocity.y = ang_vel_y
-                        self.imu_data.angular_velocity.z = ang_vel_z
-                        self.imu_data.linear_acceleration.x = lin_acc_x
-                        self.imu_data.linear_acceleration.y = lin_acc_y
-                        self.imu_data.linear_acceleration.z = lin_acc_z
-
-                        got_complete_packet = True
-                        self.packet_index = 0
-                        self.packet_state = 'header'
-                        #self.logger.info("Got complete packet")
-                        self.logger.info("Got IMU Data")
-                        msg_bytearray = ''
-                        #self.logger.info("orientation: [roll: {}, pitch: {}, yaw: {}]".format(roll, pitch, yaw))
-                        #self.logger.info("angular_velocity : {}".format(self.imu_data.angular_velocity))
-                        #self.logger.info("linear_acceleration : {}".format(self.imu_data.linear_acceleration))
-                        self.publish_imu_data()
-                        #self.logger.info("Published IMU Data")
-
+            if self.packet_state == 'header1':
+                if byte == 253:
+                    self.packet_state = 'header2'
                 else:
-                    got_complete_packet = False
-                    self.packet_index = 0
-                    msg_bytearray = ''
-                    self.logger.info("Packet of Unknown packet ID received: {}. Looking for Header Now".format(packet_id))
-                    self.packet_state = 'header'
+                    self.logger.error("header1: {}, junk request".format(byte))
 
-                self.logger.info("Residual Msg: {}".format(msg_bytearray))
-                #msg = ''
-                #self.connection_handle.raw_data = ''
+            elif self.packet_state == 'header2':
+                if byte == 253:
+                    self.packet_state = 'payload_size'
+                    self.packet_index += 2
+                else:
+                    self.logger.error("header2: {}, junk request".format(byte))
+
+            elif self.packet_state == 'payload_size':
+                # self.payload_length = struct.unpack('<I', msg_bytearray[self.packet_index:self.packet_index + 4])[0]
+                self.temp_bytearray[self.bytecount] = byte
+                self.bytecount = self.bytecount + 1
+
+                if self.bytecount == 4:
+                    self.payload_length = copy.deepcopy(struct.unpack('<I', self.temp_bytearray[0:length_size])[0])
+                    # self.payload_length = temp_bytearray[0]
+                    self.packet_index += length_size
+                    self.bytecount = 0
+                    #self.logger.info('Payload length: {}'.format(self.payload_length))
+                    self.packet_state = 'payload'
+
+            elif self.packet_state == 'payload':
+
+                # if msg_len >= self.payload_length:
+                self.odom_data.header.stamp = rospy.Time.now()
+                self.payload_bytearray[self.bytecount] = byte
+                # self.payload_bytearray.append(byte)
+                self.bytecount = self.bytecount + 1
+
+                if self.bytecount == (self.payload_length - header_plus_length_size):
+                    packet_index = 0
+                    packet_id = struct.unpack('<I', self.payload_bytearray[packet_index:packet_index + 4])[0]
+                    packet_index += 4
+                    #self.logger.info("Packet ID: {}".format(packet_id))
+                    if packet_id == 1:
+
+                        if msg_len >= odom_packet_size:
+                            timestamp = struct.unpack('<I', self.payload_bytearray[packet_index:packet_index + 4])[0]
+                            packet_index += 4
+                            pose_x = struct.unpack('<f', self.payload_bytearray[packet_index:packet_index + 4])[0] / 100.0
+                            packet_index += 4
+                            pose_y = struct.unpack('<f', self.payload_bytearray[packet_index :packet_index + 4])[0] / 100.0
+                            packet_index += 4
+                            pose_theta = struct.unpack('<f', self.payload_bytearray[packet_index:packet_index + 4])[0]
+                            packet_index += 4
+                            twist_linear = struct.unpack('<f', self.payload_bytearray[packet_index:packet_index + 4])[0] / 100.0
+                            packet_index += 4
+                            twist_angular = struct.unpack('<f', self.payload_bytearray[packet_index:packet_index + 4])[0]
+                            packet_index += 4
+
+                            self.odom_data.header.stamp = rospy.Time.now()
+                            self.odom_data.header.frame_id = "odom"
+                            self.odom_data.child_frame_id = "base_footprint"
+                            self.odom_data.pose.pose.position.x = pose_x
+                            self.odom_data.pose.pose.position.y = pose_y
+                            self.odom_data.pose.pose.position.z = 0.0
+
+                            odom_quat_trans = quaternion_from_euler(0.0, 0.0, pose_theta)
+
+                            self.odom_data.pose.pose.orientation.x = odom_quat_trans[0]
+                            self.odom_data.pose.pose.orientation.y = odom_quat_trans[1]
+                            self.odom_data.pose.pose.orientation.z = odom_quat_trans[2]
+                            self.odom_data.pose.pose.orientation.w = odom_quat_trans[3]
+
+                            self.odom_data.twist.twist.linear.x = twist_linear
+                            self.odom_data.twist.twist.linear.y = 0.0
+                            self.odom_data.twist.twist.linear.z = 0.0
+
+                            self.odom_data.twist.twist.angular.x = 0.0
+                            self.odom_data.twist.twist.angular.y = 0.0
+                            self.odom_data.twist.twist.angular.z = twist_angular
+
+                            got_complete_packet = True
+                            self.packet_index = 0
+                            self.packet_state ='header1'
+                            #self.logger.info("Got complete packet")
+                            #self.logger.info("Got Odometry Data")
+                            #self.logger.info("position: [x: {}, y: {}, theta: {}]".format(pose_x, pose_y, pose_theta) )
+                            #self.logger.info("twist: [lin: {}, ang: {}]".format(twist_linear, twist_angular))
+                            self.publish_odom_data()
+                            self.publish_tf()
+
+                    elif packet_id == 2:
+                        if msg_len >= imu_packet_size:
+                            timestamp = struct.unpack('<I', self.payload_bytearray[packet_index:packet_index + 4])[0]
+                            packet_index += 4
+                            roll = struct.unpack('<f', self.payload_bytearray[packet_index:packet_index + 4])[0]
+                            packet_index += 4
+                            pitch = struct.unpack('<f', self.payload_bytearray[packet_index:packet_index + 4])[0]
+                            packet_index += 4
+                            yaw = struct.unpack('<f', self.payload_bytearray[packet_index:packet_index + 4])[0]
+                            packet_index += 4
+                            ang_vel_x = struct.unpack('<f', self.payload_bytearray[packet_index:packet_index + 4])[0]
+                            packet_index += 4
+                            ang_vel_y = struct.unpack('<f', self.payload_bytearray[packet_index:packet_index + 4])[0]
+                            packet_index += 4
+                            ang_vel_z = struct.unpack('<f', self.payload_bytearray[packet_index:packet_index + 4])[0]
+                            packet_index += 4
+                            lin_acc_x = struct.unpack('<f', self.payload_bytearray[packet_index:packet_index + 4])[0]
+                            packet_index += 4
+                            lin_acc_y = struct.unpack('<f', self.payload_bytearray[packet_index:packet_index + 4])[0]
+                            packet_index += 4
+                            lin_acc_z = struct.unpack('<f', self.payload_bytearray[packet_index:packet_index + 4])[0]
+                            packet_index += 4
+
+                            odom_quat_trans = quaternion_from_euler(math.radians(roll), math.radians(pitch), math.radians(yaw))
+                            self.imu_data.header.stamp = rospy.Time.now()
+                            self.imu_data.header.frame_id = "imu_link"
+                            self.imu_data.orientation.x = odom_quat_trans[0]
+                            self.imu_data.orientation.y = odom_quat_trans[1]
+                            self.imu_data.orientation.z = odom_quat_trans[2]
+                            self.imu_data.orientation.w = odom_quat_trans[3]
+                            self.imu_data.angular_velocity.x = ang_vel_x
+                            self.imu_data.angular_velocity.y = ang_vel_y
+                            self.imu_data.angular_velocity.z = ang_vel_z
+                            self.imu_data.linear_acceleration.x = lin_acc_x
+                            self.imu_data.linear_acceleration.y = lin_acc_y
+                            self.imu_data.linear_acceleration.z = lin_acc_z
+
+                            got_complete_packet = True
+                            self.packet_index = 0
+                            self.packet_state = 'header1'
+                            #self.logger.info("Got complete packet")
+                            #self.logger.info("Got IMU Data")
+                            #self.logger.info("orientation: [roll: {}, pitch: {}, yaw: {}]".format(roll, pitch, yaw))
+                            #self.logger.info("angular_velocity : {}".format(self.imu_data.angular_velocity))
+                            #self.logger.info("linear_acceleration : {}".format(self.imu_data.linear_acceleration))
+                            self.publish_imu_data()
+                            #self.logger.info("Published IMU Data")
+
+                    else:
+                        got_complete_packet = False
+                        self.packet_index = 0
+                        self.logger.info("Packet of Unknown packet ID received: {}. Looking for Header Now".format(packet_id))
+                        self.packet_state = 'header1'
+
+
+                    #self.logger.info("Residual Msg: {}".format(msg_bytearray))
+                    msg = ''
+                    self.connection_handle.raw_data = ''
+                    self.bytecount = 0
+                    # self.payload_bytearray.clear()
 
             else:
-                #got_complete_packet = False
-                self.packet_state = 'header'
-                #self.logger.info("Incomplete packet received. Continuing with previous parser state: {}".format(self.packet_state))
+                got_complete_packet = False
+                self.logger.info("Incomplete packet received. Continuing with previous parser state: {}".format(self.packet_state))
 
         return got_complete_packet
 
@@ -235,18 +259,14 @@ class RtInterface:
                 #self.logger.info("Waiting for the data to arrive in rt interface")
                 self.connection_handle.recv_msg()
                 #self.logger.info("Recvd msg:{}".format(self.connection_handle.raw_data))
-                while not self.connection_handle.recv_queue.empty() : 
-                    status = self.parse_rt_msg(self.connection_handle.recv_queue.get())
+                status = self.parse_rt_msg(self.connection_handle.raw_data)
                 # if status:
                     # self.publish_odom_data()
                     # self.publish_tf()
-            except KeyboardInterrupt as key_interrupt:
-                self.sigterm_event.set()
-                self.logger.debug("keyboard interrupt. Exiting process thread")
             except Exception as ex:
                 self.logger.info("Exception: {}. Exiting process thread".format(ex))
                 self.connection_handle.raw_data = ''
-                self.packet_state = 'header'
+                self.packet_state = 'header1'
                 self.packet_index = 0
                 time.sleep(0.1)
                 # sys.exit(-1)
@@ -265,6 +285,7 @@ class RtInterface:
 
     def publish_odom_data(self):
         self.odom_pub.publish(self.odom_data)
+        #self.logger.info("published odom data")
 
     def publish_tf(self):
         self.odom_to_bl_msg.transform.translation.x = self.odom_data.pose.pose.position.x
@@ -276,7 +297,7 @@ class RtInterface:
         odom_euler = euler_from_quaternion([odom_quat.x, odom_quat.y, odom_quat.z, odom_quat.w])
         roll = float(0.0)
         pitch = float(0.0)
-        odom_quat_trans = quaternion_from_euler(roll, pitch, odom_euler[2])
+        odom_quat_trans = quaternion_from_euler(math.radians(roll), math.radians(pitch), odom_euler[2])
 
         self.odom_to_bl_msg.transform.rotation.x = odom_quat_trans[0]
         self.odom_to_bl_msg.transform.rotation.y = odom_quat_trans[1]
@@ -290,7 +311,7 @@ class RtInterface:
         self.imu_pub.publish(self.imu_data)
 
     def cmd_vel_cb(self, cmd_vel):
-        #self.logger.info("Received cmd_vel: linear: {} m/s angular: {} rad/s".format(cmd_vel.linear.x, cmd_vel.angular.z))
+        self.logger.info("Received cmd_vel: linear: {} m/s angular: {} rad/s".format(cmd_vel.linear.x, cmd_vel.angular.z))
         self.cmd_vel_data = cmd_vel
         self.cmd_vel_event.set()
         self.write_event.set()
@@ -314,12 +335,13 @@ class RtInterface:
             self.logger.info("Clearing write event")
 
     def send_cmd_vel(self):
-        #self.logger.info("Sending cmd_vel to RT")
+        self.logger.info("Sending cmd_vel to RT")
         msg_str = ''
         cmd_vel_id = 3
         msg_str = copy.deepcopy(self.pack_rt_msg(cmd_vel_id))
         self.logger.info("msg_str: {}".format(msg_str))
-        self.connection_handle.send_msg(msg_str, len(msg_str), self.rt_client_ip)
+        self.connection_handle.send_msg_to(msg_str, len(msg_str), self.rt_hostname, self.send_port)
+        # self.connection_handle.send_msg(msg_str, len(msg_str))
 
     def pack_rt_msg(self, packet_id):
         header = '\xfd\xfd'
@@ -331,21 +353,20 @@ class RtInterface:
         packet = ''
         #self.logger.info("Packing msg for packet id: {}".format(packet_id))
 
-
         if packet_id == 3:
             payload_size = 24
             packet_length = min_packet_size + payload_size
             length_str = struct.pack('<I', packet_length)
             cmd_vel = copy.deepcopy(self.cmd_vel_data)
-            payload_str = struct.pack('<d', cmd_vel.linear.x)
-            payload_str += struct.pack('<d', cmd_vel.linear.y)
-            payload_str += struct.pack('<d', cmd_vel.linear.z)
-            payload_str += struct.pack('<d', cmd_vel.angular.x)
-            payload_str += struct.pack('<d', cmd_vel.angular.y)
-            payload_str += struct.pack('<d', cmd_vel.angular.z)
+            payload_str = struct.pack('<f', cmd_vel.linear.x)
+            payload_str += struct.pack('<f', cmd_vel.linear.y)
+            payload_str += struct.pack('<f', cmd_vel.linear.z)
+            payload_str += struct.pack('<f', cmd_vel.angular.x)
+            payload_str += struct.pack('<f', cmd_vel.angular.y)
+            payload_str += struct.pack('<f', cmd_vel.angular.z)
             checksum_data = 0
             checksum_str = struct.pack('<I', checksum_data)
-            self.logger.info("payload str: {}".format(payload_str))
+            #self.logger.info("payload str: {}".format(payload_str))
 
         packet = header + length_str + packet_id_str + payload_str + checksum_str
         #self.logger.info("packet: {}".format(packet))
@@ -371,8 +392,14 @@ def main():
 
     print("Created Rt Interface")
     print("Starting to spin")
-    rospy.spin()
+    try:
+        rospy.spin()
+
+    except KeyboardInterrupt as key_interrupt:
+        rt_interface.sigterm_event.set()
+        logging.debug("keyboard interrupt. Exiting ros msg spin thread")
     rt_interface.read_thread.join()
+    rt_interface.write_thread.join()
 
     logging.debug('Exiting Rt Interface Node')
     print('Exiting Rt Interface Node')
