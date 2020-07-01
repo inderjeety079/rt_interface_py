@@ -42,6 +42,7 @@ class RtInterface:
         self.tf_broadcaster = tf2_ros.TransformBroadcaster()
         self.imu_pub = rospy.Publisher('/xsens/imu', Imu, queue_size=1)
         self.cmd_vel_subs = rospy.Subscriber('/cmd_vel', Twist, self.cmd_vel_cb, queue_size=1)
+        self.reset_odom_subs = rospy.Subscriber('/reset_odom', bool, self.reset_odom_cb, queue_size=1)
         self.cmd_vel_data = Twist()
         self.sigterm_event = Event()
         self.write_event = Event()
@@ -273,14 +274,6 @@ class RtInterface:
 
     # def send_msg_to_rt(self, msg):
 
-    def engage_emergency(self):
-        engage_emg_msg = '\xff\xff\x05\x01\x01\x00'
-        # self.send_msg_to_rt(engage_emg_msg)
-
-    def disengage_emergency(self):
-        disengage_emg_msg = '\xff\xff\x05\x01\x02\x00'
-        # self.send_msg_to_rt(disengage_emg_msg)
-
     # def receive_from_rt(self):
 
     def publish_odom_data(self):
@@ -315,6 +308,10 @@ class RtInterface:
         self.cmd_vel_data = cmd_vel
         self.cmd_vel_event.set()
         self.write_event.set()
+    
+    def reset_odom_cb(self, status):
+        self.logger.info("Request for resetting odometry")
+        self.reset_odom()
 
     def write_to_rt(self):
         while self.keep_alive and not self.sigterm_event.is_set():
@@ -333,7 +330,21 @@ class RtInterface:
 
             self.write_event.clear()
             self.logger.info("Clearing write event")
-
+    
+    def engage_emergency(self):
+        self.logger.info("Engaging emergency in  RT")
+        msg_str = ''
+        engage_emergency_id = 1
+        msg_str = copy.deepcopy(self.pack_rt_msg(engage_emergency_id))
+        self.connection_handle.send_msg_to(msg_str, len(msg_str), self.rt_hostname, self.send_port)
+        
+    def disengage_emergency(self):
+        self.logger.info("Disengaging emergency in RT")
+        msg_str = ''
+        engage_emergency_id = 2
+        msg_str = copy.deepcopy(self.pack_rt_msg(engage_emergency_id))
+        self.connection_handle.send_msg_to(msg_str, len(msg_str), self.rt_hostname, self.send_port)
+    
     def send_cmd_vel(self):
         self.logger.info("Sending cmd_vel to RT")
         msg_str = ''
@@ -342,6 +353,16 @@ class RtInterface:
         self.logger.info("msg_str: {}".format(msg_str))
         self.connection_handle.send_msg_to(msg_str, len(msg_str), self.rt_hostname, self.send_port)
         # self.connection_handle.send_msg(msg_str, len(msg_str))
+
+
+    def reset_odom(self):
+        self.logger.info("Resetting odometry in RT")
+        msg_str = ''
+        engage_emergency_id = 4
+        msg_str = copy.deepcopy(self.pack_rt_msg(engage_emergency_id))
+        self.connection_handle.send_msg_to(msg_str, len(msg_str), self.rt_hostname, self.send_port)
+        
+
 
     def pack_rt_msg(self, packet_id):
         header = '\xfd\xfd'
@@ -353,7 +374,23 @@ class RtInterface:
         packet = ''
         #self.logger.info("Packing msg for packet id: {}".format(packet_id))
 
-        if packet_id == 3:
+        if packet_id == 1:
+            payload_size = 0
+            packet_length = min_packet_size + payload_size
+            length_str = struct.pack('<I', packet_length)
+            payload_str = ''
+            checksum_data = 0
+            checksum_str = struct.pack('<I', checksum_data)
+
+        elif packet_id == 2:
+            payload_size = 0
+            packet_length = min_packet_size + payload_size
+            length_str = struct.pack('<I', packet_length)
+            payload_str = ''
+            checksum_data = 0
+            checksum_str = struct.pack('<I', checksum_data)    
+
+        elif packet_id == 3:
             payload_size = 24
             packet_length = min_packet_size + payload_size
             length_str = struct.pack('<I', packet_length)
@@ -367,15 +404,19 @@ class RtInterface:
             checksum_data = 0
             checksum_str = struct.pack('<I', checksum_data)
             #self.logger.info("payload str: {}".format(payload_str))
+        
+        elif packet_id == 4:
+            payload_size = 0
+            packet_length = min_packet_size + payload_size
+            length_str = struct.pack('<I', packet_length)
+            payload_str = ''
+            checksum_data = 0
+            checksum_str = struct.pack('<I', checksum_data)    
 
         packet = header + length_str + packet_id_str + payload_str + checksum_str
         #self.logger.info("packet: {}".format(packet))
 
         return packet
-
-
-
-
 
 
 def main():
