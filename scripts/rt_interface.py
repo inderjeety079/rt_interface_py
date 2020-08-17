@@ -1,10 +1,14 @@
 #!/usr/bin/env python2.7
 import rospy
 from udp_server import UdpServer
+# import Queue
+# import Queue.QueueHandler
+# import Queue.QueueListener
 import logging
+import logging.config
+import logging.handlers
 from collections import deque
 import sys
-# import Queue
 from  threading import Thread, Event
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist
@@ -20,7 +24,8 @@ from tf.transformations import euler_from_quaternion
 import copy
 import math
 from geometry_msgs.msg import Quaternion
-from nav_2_0_common_msgs import ResetOdom
+from nav_2_0_common_msgs.msg import ResetOdom
+from nav_2_0_common_msgs.msg import GoalMarker
 # from geometry_msgs.msg import Pose
 import struct
 import time
@@ -44,10 +49,12 @@ class RtInterface:
         self.imu_pub = rospy.Publisher('/xsens/imu', Imu, queue_size=1)
         self.cmd_vel_subs = rospy.Subscriber('/cmd_vel', Twist, self.cmd_vel_cb, queue_size=1)
         self.reset_odom_subs = rospy.Subscriber('/reset_odom', ResetOdom, self.reset_odom_cb, queue_size=1)
+        self.goal_marker_pub = rospy.Publisher("/goal_marker", GoalMarker, queue_size=1)
         self.cmd_vel_data = Twist()
         self.sigterm_event = Event()
         self.write_event = Event()
         self.cmd_vel_event = Event()
+        self.goal_event = Event()
         self.dummy_event = Event()
 
         self.odom_to_bl_msg = TransformStamped()
@@ -56,9 +63,11 @@ class RtInterface:
 
         self.odom_data = Odometry()
         self.imu_data = Imu()
+        self.goal_marker_data = GoalMarker()
         self.sigterm_event.clear()
         self.cmd_vel_event.clear()
         self.write_event.clear()
+        self.goal_event.clear()
         self.dummy_event.clear()
 
         self.packet_state = 'header1'
@@ -78,6 +87,7 @@ class RtInterface:
         payload_size = 20
         odom_packet_size = 26
         imu_packet_size = 42
+        destination_packet_size = 18
         complete_packet_size = header_plus_length_size + payload_size
         msg_bytearray = msg
         msg_len = len(self.connection_handle.data_buffer)
@@ -181,7 +191,7 @@ class RtInterface:
                             #self.logger.info("position: [x: {}, y: {}, theta: {}]".format(pose_x, pose_y, pose_theta) )
                             #self.logger.info("twist: [lin: {}, ang: {}]".format(twist_linear, twist_angular))
                             self.publish_odom_data()
-                            self.publish_tf()
+                            # self.publish_tf()
 
                     elif packet_id == 2:
                         if msg_len >= imu_packet_size:
@@ -230,7 +240,25 @@ class RtInterface:
                             #self.logger.info("linear_acceleration : {}".format(self.imu_data.linear_acceleration))
                             self.publish_imu_data()
                             #self.logger.info("Published IMU Data")
-
+                    
+                    elif packet_id == 5:
+                        if msg_len >= destination_packet_size:
+                            try:
+                                timestamp = struct.unpack('<I', self.payload_bytearray[packet_index:packet_index + 4])[0]
+                                packet_index += 4
+                                self.dm_string = (self.payload_bytearray[packet_index:packet_index + 7]).decode("utf-8")
+                                packet_index += 8
+                                self.orientation = struct.unpack('<f', self.payload_bytearray[packet_index:packet_index + 4])[0]
+                                packet_index += 4
+                                self.goal_event.set()
+                                self.logger.info("goal received from RT: DM: {}, Orientation: {}".format(self.dm_string, self.orientation))
+                            except Exception as ex:
+                                self.logger.info("Exception in unpacking destination DM. {}".format(ex))
+                            got_complete_packet = True
+                            self.packet_index = 0
+                            self.packet_state = 'header1'
+                            
+  
                     else:
                         got_complete_packet = False
                         self.packet_index = 0
@@ -262,6 +290,12 @@ class RtInterface:
                 self.connection_handle.recv_msg()
                 #self.logger.info("Recvd msg:{}".format(self.connection_handle.raw_data))
                 status = self.parse_rt_msg(self.connection_handle.raw_data)
+
+                if self.goal_event.is_set():
+                    self.goal_marker_data.marker_string = self.dm_string
+                    self.goal_marker_data.orientation = self.orientation
+                    self.goal_marker_pub.publish(self.goal_marker_data)
+                    self.goal_event.clear()
                 # if status:
                     # self.publish_odom_data()
                     # self.publish_tf()
@@ -315,12 +349,28 @@ class RtInterface:
         self.reset_odom()
 
     def write_to_rt(self):
+        emergency_engage_ts = time.time()
+        emergency_disengage_ts = time.time()
         while self.keep_alive and not self.sigterm_event.is_set():
             self.write_event.wait()
             self.logger.info("Write event wait exit \n")
             if self.cmd_vel_event.is_set():
                 self.send_cmd_vel()
                 self.cmd_vel_event.clear()
+                # if abs(self.cmd_vel_data.linear.x) == 0.0:
+                #     self.engage_emergency()
+                #     emergency_engage_ts = time.time()
+                
+                # # elif abs(self.cmd_vel_data.linear.x) > 0.01:
+                #     # self.disengage_emergency()
+                #     # emergency_disengage_ts = time.time()
+                
+                # if time.time() - emergency_engage_ts > 1.0:
+                #     self.disengage_emergency()
+                #     emergency_disengage_ts = time.time()
+                #     # Clear the costmap and Send Goal from here
+                #     self.goal_marker_pub.publish(self.goal_marker_data)
+                    
 
             elif self.dummy_event.is_set():
                 self.logger.info("Dummy Event. Clearing event flag")
@@ -424,6 +474,18 @@ def main():
     rospy.init_node("rt_interface")
     logging.basicConfig(format='[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s', level=logging.DEBUG,
                         filename='rt_interface.log')
+    
+    # log_queue = Queue.Queue(-1)
+    # queue_handler = logging.QueueHandler(log_queue)
+    # log_handler = logging.StreamHandler()
+    # log_listener = logging.QueueListener(log_queue, log_handler)
+    
+    # # root_logger = logging.getLogger()
+    # # root_logger.addHandler(queue_handler)
+    # root_logger = logging.basicConfig(format='[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s', level=logging.DEBUG,
+    #                     filename='rt_interface.log', handlers=queue_handler)
+    # log_listener.start()
+
     logging.debug('Logger created')
     rt_interface = RtInterface('10.3.1.1', 5102)
 
@@ -444,6 +506,7 @@ def main():
     rt_interface.write_thread.join()
 
     logging.debug('Exiting Rt Interface Node')
+    # log_listener.stop()
     print('Exiting Rt Interface Node')
 
 
